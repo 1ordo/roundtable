@@ -1,0 +1,11 @@
+{
+  "name": "watchpile-extension",
+  "version": "1.4.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "description": "Logs what you watch on streaming sites to your own Watchpile.",
+  "scripts": {
+    "test": "node --test",
+    "build": "node build.js"
+  }
+}

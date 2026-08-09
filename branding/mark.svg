@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Watchpile mark">
+  <rect width="64" height="64" rx="14" fill="#181114"/>
+  <g fill="none" stroke-width="5">
+    <circle cx="29.5" cy="34.5" r="19" stroke="#ec6a3f"/>
+    <circle cx="34.5" cy="29.5" r="19" stroke="#4cbaa4" opacity="0.9"/>
+  </g>
+</svg>

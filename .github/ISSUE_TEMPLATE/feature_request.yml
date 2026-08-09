@@ -1,0 +1,22 @@
+name: Feature request
+description: Something Watchpile should do and does not.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, in real-evening terms — not the solution yet.
+      placeholder: We never remember which service had the film we saved…
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would build
+      description: Your best idea for it. Rough is fine.
+  - type: textarea
+    id: fit
+    attributes:
+      label: Where it lives
+      description: Which page or moment this belongs to, if you have a feel for it (Tonight, Explore, Together, Your shelf, the booth).

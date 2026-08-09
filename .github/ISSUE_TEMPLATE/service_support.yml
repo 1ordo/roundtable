@@ -1,0 +1,42 @@
+name: A streaming service is wrong or missing
+description: Availability, or the browser extension, is wrong for a service or a country.
+labels: [catalog, help wanted]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These are the most useful reports the project gets, and the hardest
+        to find without you: nobody can test availability in every country,
+        and the extension's play detection is unverified on most services.
+  - type: input
+    id: service
+    attributes:
+      label: Which service
+      placeholder: Shahid, OSN+, Prime Video
+    validations:
+      required: true
+  - type: input
+    id: country
+    attributes:
+      label: Which country
+      placeholder: MA, EG, FR
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: What is wrong
+      options:
+        - Availability is missing or wrong on a title
+        - The extension does not log what I watch
+        - The extension cannot import my watchlist
+        - The service is not offered at all
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: Details
+      description: A title it is wrong for, and what the service actually shows.
+    validations:
+      required: true

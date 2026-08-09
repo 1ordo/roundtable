@@ -1,0 +1,347 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/big-shoulders';
+@import '@fontsource-variable/archivo';
+@import '@fontsource-variable/spline-sans-mono';
+
+/* ------------------------------------------------------------------ *
+ *  Watchpile — "The Projection Booth"
+ *
+ *  Two-strip Technicolor: every accent in the app is one of a PAIR —
+ *  ember (red-orange, the action/film side) and nitrate (blue-green,
+ *  the series/system side). House lights down: the dark theme is a
+ *  warm soot black, not a blue one; light theme is the silver screen.
+ * ------------------------------------------------------------------ */
+
+@theme {
+  --color-ink: #181114;
+  --color-panel: #221a1d;
+  --color-panel-2: #2c2226;
+  --color-line: #3d3034;
+  --color-fg: #f2ebe4;
+  --color-muted: #a2938e;
+  --color-ember: #ec6a3f;
+  --color-nitrate: #4cbaa4;
+  --color-danger: #e0505c;
+
+  --font-display: 'Big Shoulders Variable', 'Arial Narrow', sans-serif;
+  --font-sans: 'Archivo Variable', system-ui, sans-serif;
+  --font-mono: 'Spline Sans Mono Variable', ui-monospace, monospace;
+}
+
+html {
+  background-color: var(--color-ink);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  color-scheme: dark;
+  /* The page background as seen from inside a .wd-screen, where the
+     regular tokens are pinned dark. Lets a dark hero fade into whichever
+     page it sits on. */
+  --wd-page-ink: #181114;
+}
+
+/* Matinee: the silver screen by daylight. Same duotone, deepened for
+   contrast (every pair validated at AA or better). */
+html[data-theme='light'] {
+  --color-ink: #eceae5;
+  --color-panel: #f9f8f5;
+  --color-panel-2: #dfdcd5;
+  --color-line: #cbc6be;
+  --color-fg: #261c19;
+  --color-muted: #6f645e;
+  --color-ember: #b34317;
+  --color-nitrate: #166d5b;
+  --color-danger: #b03434;
+  color-scheme: light;
+  --wd-page-ink: #eceae5;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  /* Nothing should ever widen the page: wide content scrolls in its own
+     container instead. clip rather than hidden, because hidden makes the
+     body a scroll container, which breaks position:sticky descendants and
+     swallows scroll-behaviour on anchor jumps. */
+  overflow-x: clip;
+}
+
+/* The print has grain. One fixed, tiled, static noise layer over
+   everything — cheap to composite, and at this opacity it reads as
+   texture, not dirt. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 240px 240px;
+  opacity: 0.04;
+  /* No blend mode: a viewport-sized fixed layer with mix-blend-mode
+     forces the compositor to redraw the whole page on scroll, which
+     showed up as black flashes. Plain low opacity reads the same. */
+  transform: translateZ(0);
+}
+
+html[data-theme='light'] body::before {
+  opacity: 0.05;
+}
+
+/* House lights down: the corners of the room are a little darker than
+   the middle of the screen. Barely-there on purpose. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 130% 100% at 50% 38%,
+    transparent 62%,
+    rgb(0 0 0 / 0.26) 100%
+  );
+  transform: translateZ(0);
+}
+
+html[data-theme='light'] body::after {
+  opacity: 0.3;
+}
+
+/* ------------------------------------------------------------------ *
+ *  Recurring devices
+ * ------------------------------------------------------------------ */
+
+/* Edge-code label: the stamped mono legend that runs along the edge of
+   a strip of film. Leads with a short hairline tick. */
+.wd-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.wd-eyebrow::before {
+  content: '';
+  width: 0.875rem;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.wd-eyebrow--ember {
+  color: var(--color-ember);
+}
+
+.wd-eyebrow--nitrate {
+  color: var(--color-nitrate);
+}
+
+/* Frame plate: the card surface. A film cell — squarer than a web card,
+   with a faint tungsten sheen along its top edge. */
+.wd-plate {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-fg) 5%, transparent),
+    0 1px 2px rgb(0 0 0 / 0.18);
+}
+
+.wd-plate--hover {
+  transition:
+    border-color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.wd-plate--hover:hover {
+  border-color: color-mix(in srgb, var(--color-ember) 55%, var(--color-line));
+}
+
+/* Changeover cue: the dot the projectionist watches for. Flashes twice
+   when it arrives, then holds. */
+.wd-cue {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  animation: wd-cue-flash 0.9s steps(1) both;
+}
+
+@keyframes wd-cue-flash {
+  0% {
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0;
+  }
+  45% {
+    opacity: 1;
+  }
+  60% {
+    opacity: 0;
+  }
+  75% {
+    opacity: 1;
+  }
+}
+
+/* Leader sweep: one rotation of the countdown hand. Used by the boot
+   sequence and the screen loader. */
+@keyframes wd-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ *  Chrome
+ * ------------------------------------------------------------------ */
+
+/* Horizontal scrollers: thin, themed, and always reachable by trackpad,
+   wheel (shift), keyboard, and touch. */
+.wd-scroller {
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Cards scale up on hover; without this the first card's edge clips
+     against the scroll container. The margin cancels the padding so
+     nothing shifts visually. */
+  padding: 8px;
+  margin: -8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.wd-scroller::-webkit-scrollbar {
+  height: 8px;
+}
+
+.wd-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.wd-scroller::-webkit-scrollbar-thumb {
+  background-color: var(--color-line);
+  border-radius: 999px;
+}
+
+.wd-scroller:hover::-webkit-scrollbar-thumb {
+  background-color: var(--color-muted);
+}
+
+::selection {
+  background-color: color-mix(in srgb, var(--color-ember) 35%, transparent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-ember);
+  outline-offset: 2px;
+}
+
+/* A field that fills its own panel does not need a ring around it: there is
+   nowhere else the typing could be going, and the rectangle reads as a
+   rendering fault rather than as focus. */
+input.wd-bare:focus-visible,
+input.wd-bare:focus {
+  outline: none;
+}
+
+/* The poster card, animated in CSS rather than JavaScript.
+ *
+ * A home page carries two hundred of these. As motion components that was
+ * two hundred JS-driven tweens on mount and a hover handler each, which is
+ * what made scrolling stutter on anything that is not a fast laptop. In CSS
+ * the entrance and the hover both run on the compositor, off the main
+ * thread, and cost nothing per card.
+ *
+ * Only transform and opacity are animated. Both reduced-motion rules below
+ * neutralise these automatically, so there is no JS check to forget. */
+.wd-card {
+  animation: wd-card-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--wd-delay, 0ms);
+}
+
+/* Hover lives on an inner wrapper so the poster and its caption move as one
+   card, and so it does not fight the entrance animation for the transform
+   property on the same element. */
+.wd-card__inner {
+  transition: transform 0.18s ease-out;
+}
+
+@media (hover: hover) {
+  .wd-card:hover .wd-card__inner {
+    transform: scale(1.045) translateY(-4px);
+  }
+}
+
+@keyframes wd-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* The in-app setting, which stacks on top of the system one rather than
+   replacing it: someone may want stillness here and motion elsewhere. */
+:root[data-reduce-motion='true'] *,
+:root[data-reduce-motion='true'] *::before,
+:root[data-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* The screen is always dark. A projected picture keeps its own contrast
+   in both themes: hero artwork gets dark scrims and light type even on
+   the silver theme, instead of a wash of page colour over the image. */
+.wd-screen {
+  /* Re-evaluate inherited text color against the pinned tokens: without
+     this, unclassed text keeps the color computed at the page root. */
+  color: var(--color-fg);
+  --color-ink: #181114;
+  --color-panel: #221a1d;
+  --color-panel-2: #2c2226;
+  --color-line: #3d3034;
+  --color-fg: #f2ebe4;
+  --color-muted: #a2938e;
+  --color-ember: #ec6a3f;
+  --color-nitrate: #4cbaa4;
+  color-scheme: dark;
+}
+
+/* The landing page is dark whatever the app theme is: five dark product
+   screenshots inside a silver page is the framed look with extra steps. */
+.wd-landing {
+  --color-ink: #181114;
+  --color-panel: #221a1d;
+  --color-panel-2: #2c2226;
+  --color-line: #3d3034;
+  --color-fg: #f2ebe4;
+  --color-muted: #a2938e;
+  --color-ember: #ec6a3f;
+  --color-nitrate: #4cbaa4;
+  color-scheme: dark;
+}

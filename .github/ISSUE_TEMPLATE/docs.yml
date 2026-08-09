@@ -1,0 +1,23 @@
+name: Documentation
+description: Something in the README, CONTRIBUTING or the docs is wrong, missing or misleading.
+labels: [documentation, good first issue]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation that is wrong is worse than documentation that is
+        absent, so these are treated as bugs. If you already know the fix,
+        a pull request is very welcome instead.
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      placeholder: README.md, the Configuration table
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What it says, and what is actually true
+    validations:
+      required: true

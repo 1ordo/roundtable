@@ -1,0 +1,96 @@
+# The whole app on a laptop, no homelab and no identity server needed.
+#   ./scripts/dev.sh          start everything and seed sample content
+#   open http://localhost:8080
+#
+# Sign-in is local: /auth/login logs straight in as Lordo, and
+# /auth/login?as=Nadia switches person. That path is refused unless
+# WD_ENV is dev, and the app refuses to boot if it is set anywhere else.
+x-api-env: &api-env
+  WD_ENV: dev
+  WD_DEV_LOGIN: "true"
+  WD_COOKIE_SECURE: "false"
+  WD_PUBLIC_BASE_URL: http://localhost:8080
+  WD_SECRET_KEY: local-development-only
+  WD_DATA_DIR: /data
+  WD_DATABASE_URL: postgresql+asyncpg://watchdeck:watchdeck@db:5432/watchdeck
+  WD_REDIS_URL: redis://redis:6379/0
+  # Paste keys here (or in a .env file beside this one) for real catalog data.
+  WD_TMDB_API_KEY: ${WD_TMDB_API_KEY:-}
+  WD_TMDB_ACCESS_TOKEN: ${WD_TMDB_ACCESS_TOKEN:-}
+  WD_OMDB_API_KEY: ${WD_OMDB_API_KEY:-}
+  # LM Studio on the Mac, if you want the AI features locally.
+  # Set the base URL to http://host.docker.internal:1234/v1 in Admin.
+  WD_NTFY_URL: ""
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: watchdeck
+      POSTGRES_PASSWORD: watchdeck
+      POSTGRES_DB: watchdeck
+    ports:
+      - "5433:5432"
+    volumes:
+      - local-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U watchdeck -d watchdeck"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+
+  api:
+    build: ./api
+    restart: unless-stopped
+    command: ["./docker/entrypoint.sh", "api"]
+    environment: *api-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - local-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  worker:
+    build: ./api
+    restart: unless-stopped
+    command: ["./docker/entrypoint.sh", "worker"]
+    environment: *api-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - local-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    build: ./web
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  local-db:
+  local-data:

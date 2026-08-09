@@ -1,0 +1,41 @@
+name: Bug report
+description: Something broke, or behaves differently than the docs say.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you got instead.
+      placeholder: I opened a watch night, pressed Suggest something, and…
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Sign in
+        2. Go to…
+        3. Press…
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: The commit you run, or "latest main".
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: How it runs
+      description: docker compose / dev.sh / bare, OS, browser. Logs help — `docker compose logs api --tail 50`.
+  - type: checkboxes
+    id: security
+    attributes:
+      label: Not a security report
+      options:
+        - label: This is not a vulnerability (those go through SECURITY.md, not the issue tracker).
+          required: true

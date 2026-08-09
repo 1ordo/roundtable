@@ -1,0 +1,96 @@
+{
+  "manifest_version": 3,
+  "name": "Watchpile",
+  "version": "1.4.0",
+  "description": "Logs what you watch on streaming sites to your own Watchpile.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.netflix.com/*",
+    "https://*.primevideo.com/*",
+    "https://*.amazon.com/gp/video/*",
+    "https://*.disneyplus.com/*",
+    "https://shahid.mbc.net/*",
+    "https://*.osnplus.com/*",
+    "https://*.max.com/*",
+    "https://*.hbomax.com/*",
+    "https://tv.apple.com/*",
+    "https://*.hulu.com/*",
+    "https://*.crunchyroll.com/*",
+    "https://*.paramountplus.com/*",
+    "https://*.peacocktv.com/*",
+    "https://*.starzplay.com/*",
+    "https://*.watchit.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Watchpile",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.netflix.com/*",
+        "https://*.primevideo.com/*",
+        "https://*.amazon.com/gp/video/*",
+        "https://*.disneyplus.com/*",
+        "https://shahid.mbc.net/*",
+        "https://*.osnplus.com/*",
+        "https://*.max.com/*",
+        "https://*.hbomax.com/*",
+        "https://tv.apple.com/*",
+        "https://*.hulu.com/*",
+        "https://*.crunchyroll.com/*",
+        "https://*.paramountplus.com/*",
+        "https://*.peacocktv.com/*",
+        "https://*.starzplay.com/*",
+        "https://*.watchit.com/*"
+      ],
+      "js": [
+        "sites.js",
+        "content.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "import.html"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "minimum_chrome_version": "116",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "watchpile@lordo.dev",
+      "strict_min_version": "121.0"
+    }
+  }
+}

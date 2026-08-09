@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only by default. A job that needs more asks for it.
+permissions:
+  contents: read
+
+# A new push supersedes the run in flight for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The quickstart is the first thing every visitor runs, and it was broken
+  # for forty commits without CI noticing: the file did not even parse, and
+  # nothing here ever parsed it. Cheap to check, expensive to get wrong.
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: the documented quickstart file is valid
+        run: |
+          cp .env.example .env
+          docker compose -f compose.yaml config >/dev/null
+      - name: and it publishes a port to reach it on
+        run: docker compose -f compose.yaml config | grep -q 'published:'
+
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check app tests
+      - run: ruff format --check app tests
+      - run: mypy app
+      # pytest starts its own pgvector container via testcontainers
+      - run: pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  extension:
+    # Plain files, no bundler, so the whole job is: does the logic hold and
+    # does it still pack. It should finish in a second; the timeout is there
+    # to catch a leaked timer rather than to allow for one.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: extension
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test
+      - run: node build.js
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension
+          path: extension/dist/*.zip
