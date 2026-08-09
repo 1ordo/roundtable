@@ -1,0 +1,214 @@
+/* The Projection Booth, reduced to what a two-page static site needs.
+   No external requests: no font CDN, no analytics, nothing to load from
+   anyone else. A project whose whole pitch is that nothing leaves your
+   machine should not open a marketing page that phones three companies. */
+
+:root {
+  --ink: #12100f;
+  --soot: #1a1715;
+  --plate: #221e1b;
+  --line: #35302c;
+  --fg: #f2ede8;
+  --muted: #a2968c;
+  --ember: #ec6a3f;
+  --nitrate: #4cbaa4;
+  --sans: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 6rem;
+}
+
+a {
+  color: var(--ember);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+a:hover {
+  color: var(--fg);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+h1 {
+  font-size: clamp(2.4rem, 7vw, 3.6rem);
+  margin: 0 0 1rem;
+}
+h2 {
+  font-size: 1.5rem;
+  margin: 3rem 0 0.75rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--line);
+}
+h3 {
+  font-size: 1.1rem;
+  margin: 2rem 0 0.5rem;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ember);
+  margin: 0 0 1rem;
+}
+.eyebrow--nitrate {
+  color: var(--nitrate);
+}
+
+.lede {
+  font-size: 1.2rem;
+  color: var(--fg);
+  opacity: 0.92;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.mark {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 3rem;
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-size: 0.95rem;
+}
+.mark svg {
+  flex: none;
+}
+.mark a {
+  color: var(--fg);
+  text-decoration: none;
+}
+
+pre {
+  background: var(--soot);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1rem 1.1rem;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+:not(pre) > code {
+  background: var(--plate);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.25rem 0;
+  font-size: 0.94rem;
+  display: block;
+  overflow-x: auto;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.6rem 0.9rem 0.6rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+th {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+ul {
+  padding-left: 1.15rem;
+}
+li {
+  margin: 0.35rem 0;
+}
+
+.cta {
+  display: inline-block;
+  margin: 0.4rem 0.5rem 0.4rem 0;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--ember);
+  border-radius: 4px;
+  color: var(--ember);
+  text-decoration: none;
+  font-size: 0.95rem;
+  transition: background-color 0.15s ease;
+}
+.cta:hover {
+  background: color-mix(in srgb, var(--ember) 14%, transparent);
+  color: var(--ember);
+}
+.cta--quiet {
+  border-color: var(--line);
+  color: var(--muted);
+}
+.cta--quiet:hover {
+  border-color: var(--fg);
+  color: var(--fg);
+  background: transparent;
+}
+
+footer {
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.shot {
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  margin: 2rem 0;
+  display: block;
+}
+
+/* The viewer's preference wins over the house style. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

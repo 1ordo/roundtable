@@ -1,0 +1,48 @@
+name: Self-hosting help
+description: It will not start, will not sign you in, or is behaving oddly on your server.
+labels: [support, self-hosting]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most of these turn out to be one of three things, so it is worth a
+        look first: the app reachable at something other than the address in
+        `RT_PUBLIC_BASE_URL`, `RT_COOKIE_SECURE` left on over plain HTTP
+        (sign-in appears to work, then bounces you back), or no TMDB key.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens
+      description: What you ran, what you expected, what you got.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release tag or commit you are running.
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: How you run it
+      options:
+        - docker compose (the published images)
+        - docker compose with --build
+        - scripts/dev.sh
+        - Something else, described below
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "`docker compose logs api --tail 80` usually has it. Remove any keys."
+      render: shell
+  - type: input
+    id: environment
+    attributes:
+      label: Host
+      description: OS, architecture (amd64 or arm64), and how you reach the app.
+      placeholder: Debian 12, arm64, behind Caddy at https://watch.example.net

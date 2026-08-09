@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roundtable — self-hosted film and series tracking</title>
+    <meta
+      name="description"
+      content="Self-hosted film and series tracker that knows which of your services has something, in your country. Episode tracking, cinema alerts, and watch nights for when there is more than one of you."
+    />
+    <link rel="canonical" href="https://roundtable.watch/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://roundtable.watch/" />
+    <meta property="og:site_name" content="Roundtable" />
+    <meta property="og:title" content="Roundtable — self-hosted film and series tracking" />
+    <meta
+      property="og:description"
+      content="Knows which of your services has something, in your country. Tracks series by the episode. Settles what to watch when there is more than one of you."
+    />
+    <meta property="og:image" content="https://roundtable.watch/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='11' fill='none' stroke='%23ec6a3f' stroke-width='3'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="_style.css" />
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="mark">
+        <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true">
+          <circle cx="16" cy="16" r="11" fill="none" stroke="#ec6a3f" stroke-width="3" />
+          <circle cx="16" cy="16" r="4" fill="#4cbaa4" />
+        </svg>
+        <a href="/">Roundtable</a>
+      </div>
+
+      <p class="eyebrow">Self-hosted</p>
+      <h1>What are we watching?</h1>
+      <p class="lede">
+        A film and series tracker you run yourself. It knows which of
+        <em>your</em> subscriptions has something, in <em>your</em> country,
+        tracks series episode by episode, and settles what to put on when
+        there is more than one of you.
+      </p>
+
+      <p>
+        <a class="cta" href="https://github.com/1ordo/roundtable">Get it on GitHub</a>
+        <a class="cta cta--quiet" href="https://github.com/1ordo/roundtable#running-it">How to run it</a>
+      </p>
+
+      <img class="shot" src="home.webp" alt="The Roundtable home page, showing a hero title and personalised shelves" width="1440" height="900" loading="lazy" />
+
+      <h2>Why it exists</h2>
+      <p>
+        Five subscriptions and still nothing to watch. Films leaving the
+        cinemas before you heard about them. Where to watch it in one app,
+        what it is rated in another, your list in a third, and none of them
+        working properly outside a handful of markets.
+      </p>
+
+      <h2>What it does</h2>
+      <table>
+        <tr>
+          <th>Your services, your country</th>
+          <td>
+            Availability that covers Shahid, OSN+, STARZPLAY and Watch It
+            alongside Netflix and the rest. Suggestions are limited to what
+            you actually subscribe to, unless you turn that off.
+          </td>
+        </tr>
+        <tr>
+          <th>Series by the episode</th>
+          <td>
+            A season grid, what you have seen, and what to put on next. Only
+            episodes that have aired count, so a show still running reads as
+            up to date rather than half finished.
+          </td>
+        </tr>
+        <tr>
+          <th>Watch nights</th>
+          <td>
+            Invite people. Everyone suggests into one queue and votes, the
+            suggestions blended from all of your tastes. Whatever wins lands
+            in every history at once.
+          </td>
+        </tr>
+        <tr>
+          <th>Cinema alerts</th>
+          <td>
+            One notification a week before a film opens where you are, which
+            is enough notice to make a plan with someone.
+          </td>
+        </tr>
+        <tr>
+          <th>No AI service required</th>
+          <td>
+            Recommendations run on embeddings generated locally. Point it at
+            an OpenAI-compatible endpoint if you want the assistant; it works
+            fully without one.
+          </td>
+        </tr>
+      </table>
+
+      <h2>Running it</h2>
+      <p>You need Docker and a free TMDB key. Everything else has a working default.</p>
+      <pre><code>git clone https://github.com/1ordo/roundtable
+cd roundtable
+cp .env.example .env      # then put your TMDB key in it
+docker compose up -d</code></pre>
+      <p class="muted">
+        Open <code>http://localhost:8080</code> and make the first account,
+        which becomes the admin. Registration closes behind it.
+      </p>
+
+      <h2>Honest about what works</h2>
+      <p>
+        Most of it works and is tested. The browser extension is the
+        exception: importing your watchlist works on Netflix, Prime Video and
+        OSN+, but automatic play detection is written for eight services and
+        confirmed on none of them. It is marked that way in the README rather
+        than discovered the hard way, and it is
+        <a href="https://github.com/1ordo/roundtable/blob/main/ROADMAP.md">the best place to help</a>.
+      </p>
+
+      <h2>Open source</h2>
+      <p>
+        GNU AGPL v3. Run it, change it, fork it, host it for other people. If
+        you offer a modified version over a network you publish your changes
+        too. The name and logo are reserved separately.
+      </p>
+
+      <footer>
+        <p>
+          <a href="https://github.com/1ordo/roundtable">Source</a> ·
+          <a href="https://github.com/1ordo/roundtable/blob/main/ROADMAP.md">Roadmap</a> ·
+          <a href="https://github.com/1ordo/roundtable/discussions">Discussions</a> ·
+          <a href="privacy.html">Extension privacy</a>
+        </p>
+        <p>
+          This product uses the TMDB API but is not endorsed or certified by
+          TMDB. Availability data by JustWatch. Ratings from OMDb, which
+          sources IMDb, Rotten Tomatoes and Metacritic.
+        </p>
+        <p>No analytics on this page, and none in the app.</p>
+      </footer>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+Roundtable
+Copyright (C) 2026 Mohamed Yousry
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License
+for more details. You should have received a copy of the licence along with
+this program, in the file LICENSE. If not, see <https://www.gnu.org/licenses/>.
+
+"Roundtable" and the Roundtable logo are not covered by that licence.
+See TRADEMARK.md.
+
+
+---------------------------------------------------------------------------
+Third-party data and assets
+---------------------------------------------------------------------------
+
+The Movie Database (TMDB)
+  This product uses the TMDB API but is not endorsed or certified by TMDB.
+  Catalog data, artwork and watch-provider data are supplied by TMDB under
+  their terms of use. Operators supply their own API key.
+  https://www.themoviedb.org/
+
+JustWatch
+  Watch-provider availability reaches this application through the TMDB API
+  and is sourced from JustWatch.
+  https://www.justwatch.com/
+
+OMDb
+  IMDb, Rotten Tomatoes and Metacritic scores, where an operator has
+  configured an OMDb key. OMDb's free tier is for personal, non-commercial
+  use; the key and the terms it is used under belong to the operator.
+  https://www.omdbapi.com/
+
+Fonts, each under the SIL Open Font License 1.1
+  Big Shoulders Display  Copyright (c) The Big Shoulders Project Authors
+  Archivo                Copyright (c) The Archivo Project Authors
+  Spline Sans Mono       Copyright (c) The Spline Sans Mono Project Authors
+  https://openfontlicense.org/
+
+Streaming service names and logos are the trademarks of their respective
+owners and are used to identify where a title can be watched. Their
+appearance implies no affiliation with or endorsement by those services.

@@ -1,0 +1,40 @@
+# Publishes site/ to GitHub Pages, which is where the browser extension's
+# privacy policy has to live: the Chrome Web Store requires a publicly
+# reachable URL for it, and a self-hosted instance address is not one.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # contents: read is not inherited. A job-level permissions block
+      # replaces the top-level one rather than adding to it, so without this
+      # the checkout of a private repository fails with "not found".
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

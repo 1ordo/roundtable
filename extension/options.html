@@ -1,0 +1,57 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Roundtable settings</title>
+<link rel="stylesheet" href="ui.css" />
+<main>
+  <header>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+      <circle cx="11" cy="13" r="7" fill="none" stroke="#ec6a3f" stroke-width="2.2"/>
+      <circle cx="13" cy="11" r="7" fill="none" stroke="#4cbaa4" stroke-width="2.2" opacity="0.9"/>
+    </svg>
+    <h1>Roundtable</h1>
+  </header>
+
+  <p class="lead">
+    Point this at your own Roundtable and it will log what you watch on the
+    streaming sites you use.
+  </p>
+
+  <label>
+    <span>Where your Roundtable is</span>
+    <input id="baseUrl" type="url" placeholder="http://localhost:8080" spellcheck="false" />
+    <small>The address you open it at, without a trailing slash.</small>
+  </label>
+
+  <label>
+    <span>Your API token</span>
+    <input id="token" type="password" placeholder="wdk_..." spellcheck="false" />
+    <small>Settings, then Account, then Tokens. It is only stored in this browser.</small>
+  </label>
+
+  <div class="row">
+    <button id="save" class="primary">Save and check</button>
+    <span id="status"></span>
+  </div>
+
+  <hr />
+
+  <label class="row" style="align-items:flex-start;gap:9px">
+    <input type="checkbox" id="autoSync" style="margin-top:3px" />
+    <span>
+      <strong style="display:block">Keep my watchlists in sync</strong>
+      <span class="fine">
+        When you open a service you subscribe to, its saved list is read and
+        anything new is added to your Roundtable watchlist. At most once every
+        ten minutes per service, and only what the catalog recognises.
+      </span>
+    </span>
+  </label>
+
+  <hr />
+  <p class="fine">
+    Nothing is sent anywhere except the address above. The extension reads the
+    title and how far through you are, never the video and never anything else
+    on the page.
+  </p>
+</main>
+<script src="options.js"></script>

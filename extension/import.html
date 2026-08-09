@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Import your list</title>
+<link rel="stylesheet" href="ui.css" />
+<main class="wide">
+  <header>
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden>
+      <circle cx="11" cy="13" r="7" fill="none" stroke="#ec6a3f" stroke-width="2.2"/>
+      <circle cx="13" cy="11" r="7" fill="none" stroke="#4cbaa4" stroke-width="2.2" opacity="0.9"/>
+    </svg>
+    <h1>Import your list</h1>
+  </header>
+  <p id="summary" class="lead"></p>
+  <div class="row" style="margin-bottom:14px">
+    <button id="all" class="ghost">Select all</button>
+    <button id="none" class="ghost">Select none</button>
+    <span style="flex:1"></span>
+    <button id="save" class="primary">Add to my watchlist</button>
+  </div>
+  <div id="grid" class="grid"></div>
+  <section id="misses"></section>
+</main>
+<script src="import.js"></script>

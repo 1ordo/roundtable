@@ -1,0 +1,283 @@
+"""Bootstrap the catalog with real titles.
+
+TMDB gives trending and discovery for free; OMDb does not, so when OMDb is
+the active source the catalog is primed from a curated list of real films and
+series. Every entry is resolved against OMDb, so names, posters, genres,
+languages and ratings all come from real data, never from this file.
+
+The list is deliberately broad: many decades, many languages, many genres, so
+category rows and the taste engine have something honest to work with.
+"""
+
+TITLES: list[str] = [
+    # Modern landmarks
+    "Inception",
+    "The Dark Knight",
+    "Interstellar",
+    "Dune",
+    "Dune: Part Two",
+    "Oppenheimer",
+    "Everything Everywhere All at Once",
+    "Parasite",
+    "Whiplash",
+    "Arrival",
+    "Blade Runner 2049",
+    "Mad Max: Fury Road",
+    "La La Land",
+    "The Grand Budapest Hotel",
+    "Get Out",
+    "Knives Out",
+    "Sicario",
+    "Prisoners",
+    "Gone Girl",
+    "The Social Network",
+    "Her",
+    "Ex Machina",
+    "Moonlight",
+    "Nomadland",
+    "The Banshees of Inisherin",
+    "Past Lives",
+    "Poor Things",
+    "The Substance",
+    "Anatomy of a Fall",
+    "The Zone of Interest",
+    # Classics
+    "The Godfather",
+    "The Godfather Part II",
+    "Pulp Fiction",
+    "Goodfellas",
+    "Fight Club",
+    "The Matrix",
+    "Se7en",
+    "The Silence of the Lambs",
+    "Schindler's List",
+    "Forrest Gump",
+    "The Shawshank Redemption",
+    "Casablanca",
+    "Rear Window",
+    "Vertigo",
+    "Psycho",
+    "12 Angry Men",
+    "Apocalypse Now",
+    "Taxi Driver",
+    "Raging Bull",
+    "Chinatown",
+    "2001: A Space Odyssey",
+    "A Clockwork Orange",
+    "The Shining",
+    "Alien",
+    "Aliens",
+    "Jaws",
+    "Back to the Future",
+    "Die Hard",
+    # Animation
+    "Spirited Away",
+    "Princess Mononoke",
+    "My Neighbor Totoro",
+    "Grave of the Fireflies",
+    "Your Name.",
+    "Akira",
+    "Perfect Blue",
+    "Spider-Man: Into the Spider-Verse",
+    "Spider-Man: Across the Spider-Verse",
+    "Coco",
+    "Up",
+    "WALL-E",
+    "Ratatouille",
+    "Inside Out",
+    "Toy Story",
+    "The Incredibles",
+    "How to Train Your Dragon",
+    "The Lion King",
+    "Klaus",
+    "The Boy and the Heron",
+    # World cinema
+    "Oldboy",
+    "Memories of Murder",
+    "Burning",
+    "The Handmaiden",
+    "Train to Busan",
+    "Seven Samurai",
+    "Rashomon",
+    "Ikiru",
+    "Tokyo Story",
+    "Drive My Car",
+    "City of God",
+    "Amores Perros",
+    "Roma",
+    "Pan's Labyrinth",
+    "The Secret in Their Eyes",
+    "Amelie",
+    "The Intouchables",
+    "La Haine",
+    "A Prophet",
+    "Portrait of a Lady on Fire",
+    "Cinema Paradiso",
+    "Life Is Beautiful",
+    "The Great Beauty",
+    "Bicycle Thieves",
+    "Run Lola Run",
+    "Das Boot",
+    "The Lives of Others",
+    "Toni Erdmann",
+    "Capernaum",
+    "The Insult",
+    "Wadjda",
+    "Theeb",
+    "Cairo Station",
+    "The Blue Elephant",
+    "The Yacoubian Building",
+    "Omar",
+    "Paradise Now",
+    "Timbuktu",
+    "Casablanca Beats",
+    "The Attack",
+    "Much Loved",
+    "A Separation",
+    "The Salesman",
+    "Children of Heaven",
+    "Taste of Cherry",
+    "Lagaan",
+    "3 Idiots",
+    "Dangal",
+    "Gully Boy",
+    "RRR",
+    "Crouching Tiger, Hidden Dragon",
+    "In the Mood for Love",
+    "Chungking Express",
+    "Hero",
+    "Farewell My Concubine",
+    "Winter Sleep",
+    "Once Upon a Time in Anatolia",
+    # Recent crowd pleasers
+    "Top Gun: Maverick",
+    "Barbie",
+    "The Batman",
+    "John Wick",
+    "Sinners",
+    "Wicked",
+    "Godzilla Minus One",
+    "Mission: Impossible - Fallout",
+    "Avengers: Endgame",
+    "Guardians of the Galaxy",
+    "Logan",
+    "Joker",
+    "No Time to Die",
+    "Skyfall",
+    "Baby Driver",
+    "Edge of Tomorrow",
+    "Arrival",
+    "The Martian",
+    "Gravity",
+    "Ford v Ferrari",
+    # Series
+    "Breaking Bad",
+    "Better Call Saul",
+    "The Wire",
+    "The Sopranos",
+    "Chernobyl",
+    "Band of Brothers",
+    "The Office",
+    "Fleabag",
+    "Succession",
+    "Severance",
+    "The Bear",
+    "Dark",
+    "Squid Game",
+    "Money Heist",
+    "Narcos",
+    "Stranger Things",
+    "Game of Thrones",
+    "True Detective",
+    "Mr. Robot",
+    "Peaky Blinders",
+    "Sherlock",
+    "Black Mirror",
+    "Arcane",
+    "Attack on Titan",
+    "Death Note",
+    "Fullmetal Alchemist: Brotherhood",
+    "Cowboy Bebop",
+    "The Last of Us",
+    "Andor",
+    "The Mandalorian",
+    "Ted Lasso",
+    "Shogun",
+    "Twin Peaks",
+    "The Leftovers",
+    "Watchmen",
+    "Fargo",
+    "Rome",
+    "Call My Agent!",
+    "Lupin",
+    "The Rain",
+    "Elite",
+    "Ramy",
+]
+
+
+# Category rows the home page builds from real genre data. Keys are TMDB
+# genre ids, which OMDb genres are mapped onto.
+CATEGORY_ROWS: list[tuple[str, int, str]] = [
+    ("movie", 878, "Science fiction"),
+    ("movie", 18, "Drama"),
+    ("movie", 35, "Comedy"),
+    ("movie", 53, "Thriller"),
+    ("movie", 27, "Horror"),
+    ("movie", 16, "Animation"),
+    ("movie", 28, "Action"),
+    ("movie", 80, "Crime"),
+    ("movie", 10749, "Romance"),
+    ("movie", 9648, "Mystery"),
+    ("movie", 12, "Adventure"),
+    ("movie", 14, "Fantasy"),
+    ("movie", 99, "Documentary"),
+    ("movie", 36, "History"),
+    ("movie", 10752, "War"),
+    ("tv", 18, "Drama series"),
+    ("tv", 80, "Crime series"),
+    ("tv", 35, "Comedy series"),
+    ("tv", 878, "Science fiction series"),
+    ("tv", 16, "Animated series"),
+]
+
+# Language rows, so the catalog does not read as English-only.
+LANGUAGE_ROWS: list[tuple[str, str]] = [
+    ("ar", "Arabic cinema"),
+    ("fr", "French cinema"),
+    ("ja", "Japanese cinema"),
+    ("ko", "Korean cinema"),
+    ("es", "Spanish language"),
+    ("hi", "Indian cinema"),
+    ("it", "Italian cinema"),
+    ("tr", "Turkish cinema"),
+    ("fa", "Iranian cinema"),
+    ("de", "German cinema"),
+]
+
+
+async def import_via_tmdb(db, names: list[str]) -> int:
+    """Resolve each curated name against TMDB and ingest it fully, which
+    also stores backdrops and per-country availability. Used once TMDB is
+    reachable so the catalog stops depending on the OMDb fallback."""
+    import logging
+
+    from app.catalog import ingest, tmdb
+
+    logger = logging.getLogger("roundtable.bootstrap")
+    added = 0
+    for name in names:
+        try:
+            match = await tmdb.best_match(db, name)
+            if match is None:
+                logger.info("no TMDB match for %s", name)
+                continue
+            await ingest.ensure_title(db, match["media_type"], match["id"])
+            added += 1
+        except (tmdb.TmdbError, tmdb.TmdbNotConfigured) as exc:
+            logger.warning("stopping import: %s", exc)
+            break
+        if added % 25 == 0:
+            await db.commit()
+    await db.commit()
+    return added

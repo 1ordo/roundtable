@@ -1,0 +1,36 @@
+# The dependency graph is public the moment the repo is, so an unanswered
+# CVE in something that handles sessions and passwords is public too.
+# Weekly, grouped, so it is a handful of pull requests rather than thirty.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /api
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      api-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      web-minor:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /extension
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+
+  # Actions pinned by tag drift silently; this is the only thing that
+  # notices when one of them is abandoned or compromised.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3

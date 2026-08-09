@@ -1,0 +1,115 @@
+# The self-hoster's compose file. Everything here has a working default
+# except the TMDB key, so `cp .env.example .env && docker compose up -d`
+# starts a real instance.
+#
+# Nothing sensitive lives in this file. Values come from .env beside it,
+# which is gitignored.
+x-api-env: &api-env
+  RT_ENV: prod
+  # Must match the app-data volume mount below, or uploads vanish on redeploy.
+  RT_DATA_DIR: /data
+  RT_PUBLIC_BASE_URL: ${RT_PUBLIC_BASE_URL:-http://localhost:8080}
+  # Left empty on purpose. The entrypoint generates one into the data volume
+  # on first boot and reuses it after that. Set your own to override.
+  RT_SECRET_KEY: ${RT_SECRET_KEY:-}
+  # Role and database are settable so an instance created under the old
+  # name keeps working: set RT_DB_USER and RT_DB_NAME to what its volume
+  # already contains, and nothing has to be migrated.
+  RT_DATABASE_URL: postgresql+asyncpg://${RT_DB_USER:-roundtable}:${RT_DB_PASSWORD:-roundtable}@db:5432/${RT_DB_NAME:-roundtable}
+  RT_REDIS_URL: redis://redis:6379/0
+  # Secure cookies are dropped by the browser over plain HTTP, and the usual
+  # self-hosted address is http://192.168.x.x or a tailnet name rather than
+  # localhost, which browsers exempt. Off by default so sign-in works; turn
+  # it on once you are behind HTTPS.
+  RT_COOKIE_SECURE: ${RT_COOKIE_SECURE:-false}
+  # The catalog. The only thing you have to supply.
+  RT_TMDB_API_KEY: ${RT_TMDB_API_KEY:-}
+  RT_TMDB_ACCESS_TOKEN: ${RT_TMDB_ACCESS_TOKEN:-}
+  RT_OMDB_API_KEY: ${RT_OMDB_API_KEY:-}
+  RT_DEFAULT_COUNTRY: ${RT_DEFAULT_COUNTRY:-}
+  # Optional single sign-on. Empty means password sign-in only.
+  RT_OIDC_ISSUER: ${RT_OIDC_ISSUER:-}
+  RT_OIDC_CLIENT_ID: ${RT_OIDC_CLIENT_ID:-}
+  RT_OIDC_CLIENT_SECRET: ${RT_OIDC_CLIENT_SECRET:-}
+  # Optional delivery. Empty means that channel is off.
+  RT_NTFY_URL: ${RT_NTFY_URL:-}
+  RT_RESEND_API_KEY: ${RT_RESEND_API_KEY:-}
+  RT_RESEND_FROM: ${RT_RESEND_FROM:-}
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${RT_DB_USER:-roundtable}
+      POSTGRES_PASSWORD: ${RT_DB_PASSWORD:-roundtable}
+      POSTGRES_DB: ${RT_DB_NAME:-roundtable}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RT_DB_USER:-roundtable} -d ${RT_DB_NAME:-roundtable}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  api:
+    # Published by the release workflow for amd64 and arm64, so a self-hoster
+    # pulls rather than compiling. `build` stays as a fallback: contributors
+    # running from a checkout get their own code with
+    # `docker compose up -d --build`.
+    image: ghcr.io/1ordo/roundtable-api:${RT_VERSION:-latest}
+    build: ./api
+    restart: unless-stopped
+    command: ["./docker/entrypoint.sh", "api"]
+    environment: *api-env
+    volumes:
+      - app-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: ghcr.io/1ordo/roundtable-api:${RT_VERSION:-latest}
+    build: ./api
+    restart: unless-stopped
+    command: ["./docker/entrypoint.sh", "worker"]
+    environment: *api-env
+    volumes:
+      - app-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    image: ghcr.io/1ordo/roundtable-web:${RT_VERSION:-latest}
+    build: ./web
+    restart: unless-stopped
+    # The only service published to the host. Put a reverse proxy in front
+    # of this port for HTTPS; the database and Redis stay on the internal
+    # network and are never reachable from outside.
+    ports:
+      - "${RT_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  db-data:
+  redis-data:
+  app-data:
