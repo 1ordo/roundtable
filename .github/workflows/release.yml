@@ -77,7 +77,7 @@ jobs:
         working-directory: extension
       - run: node build.js
         working-directory: extension
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           files: extension/dist/*.zip
