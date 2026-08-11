@@ -5,6 +5,7 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator
+from datetime import date as dt_date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -31,6 +32,9 @@ class TitleCard(BaseModel):
     poster_path: str | None
     backdrop_path: str | None
     year: int | None
+    # The full date, not only the year. A franchise that ships four films in
+    # one year cannot be put in release order without it.
+    release_date: dt_date | None = None
     tmdb_rating: float | None
     # 0-100 fit for the signed-in person, absent until there is enough signal.
     match: int | None = None
@@ -52,8 +56,14 @@ def _card_from_tmdb(item: dict, media_type: str | None = None) -> TitleCard | No
     kind = media_type or item.get("media_type")
     if kind not in ("movie", "tv"):
         return None
-    date = item.get("release_date") if kind == "movie" else item.get("first_air_date")
-    year = int(date[:4]) if date and date[:4].isdigit() else None
+    raw = item.get("release_date") if kind == "movie" else item.get("first_air_date")
+    year = int(raw[:4]) if raw and raw[:4].isdigit() else None
+    released = None
+    if raw:
+        try:
+            released = dt_date.fromisoformat(str(raw)[:10])
+        except ValueError:
+            released = None
     return TitleCard(
         tmdb_id=item["id"],
         type=kind,
@@ -61,6 +71,7 @@ def _card_from_tmdb(item: dict, media_type: str | None = None) -> TitleCard | No
         poster_path=item.get("poster_path"),
         backdrop_path=item.get("backdrop_path"),
         year=year,
+        release_date=released,
         tmdb_rating=item.get("vote_average"),
     )
 

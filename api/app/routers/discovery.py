@@ -2,7 +2,7 @@
 title into everything connected to it."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -56,8 +56,10 @@ async def get_collection(
         for card in (_card_from_tmdb(item, "movie") for item in payload.get("parts", []))
         if card is not None
     ]
-    # Release order is how anyone watches a franchise.
-    parts.sort(key=lambda card: card.year or 9999)
+    # Release order, by date rather than year. Sorting by year looks right
+    # until a franchise ships four films in one of them, and then the order
+    # within that year is whatever TMDB happened to return.
+    parts.sort(key=lambda card: (card.release_date is None, card.release_date or date.max))
 
     tmdb_ids = [card.tmdb_id for card in parts]
     known = {
@@ -615,3 +617,77 @@ async def unfollow_person(
     if row is not None:
         await db.delete(row)
         await db.commit()
+
+
+class WatchOrderTitle(BaseModel):
+    tmdb_id: int
+    type: str
+    name: str
+    year: int | None
+    release_date: date | None
+    poster_path: str | None
+    overview: str | None
+    watched: bool
+
+
+class WatchOrderOut(BaseModel):
+    name: str
+    # universe | collection | anchor
+    kind: str
+    titles: list[WatchOrderTitle]
+    watched: int
+    total: int
+    note: str = ""
+
+
+@router.get("/watch-order", response_model=WatchOrderOut)
+async def watch_order(
+    q: str | None = None,
+    tmdb_id: int | None = None,
+    type: str = "movie",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WatchOrderOut:
+    """A franchise, in the order you would watch it, with what you have seen.
+
+    Deterministic. Given "marvel" or "harry potter" this is the whole answer,
+    with no model involved, which is why it also works on an instance with
+    the assistant switched off. The assistant calls the same endpoint and
+    writes a sentence around the result rather than producing the list.
+    """
+    from app.catalog import watch_order as resolver
+
+    if not q and tmdb_id is None:
+        raise HTTPException(status_code=422, detail="ask for a franchise by name or by title")
+
+    try:
+        found = await resolver.resolve(db, query=q, tmdb_id=tmdb_id, media_type=type, user=user)
+    except tmdb.TmdbNotConfigured as exc:
+        raise HTTPException(status_code=503, detail="tmdb_not_configured") from exc
+    except tmdb.TmdbError as exc:
+        raise HTTPException(status_code=502, detail="tmdb_unavailable") from exc
+    await db.commit()
+
+    if found is None:
+        raise HTTPException(status_code=404, detail="no franchise by that name")
+
+    return WatchOrderOut(
+        name=found.name,
+        kind=found.kind,
+        titles=[
+            WatchOrderTitle(
+                tmdb_id=t.tmdb_id,
+                type=t.type,
+                name=t.name,
+                year=t.year,
+                release_date=t.release_date,
+                poster_path=t.poster_path,
+                overview=t.overview,
+                watched=t.watched,
+            )
+            for t in found.titles
+        ],
+        watched=sum(1 for t in found.titles if t.watched),
+        total=len(found.titles),
+        note=found.note,
+    )

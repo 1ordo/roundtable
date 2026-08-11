@@ -149,9 +149,55 @@ async def _profile_block(db: AsyncSession, user: User) -> str:
     return "\n".join(lines) or "No history yet; this person is new here."
 
 
+# Someone describing a film they cannot name, rather than asking for a
+# recommendation. Cheap to test and it decides whether the full-text leg is
+# worth a query: "what should I watch tonight" gains nothing from it.
+_RECALL = re.compile(
+    r"\b(what(?:'s| is| was)? (?:the |that )?(?:film|movie|show|series|one)\b"
+    r"|the one (?:where|with|about)|remember|forgot|forgotten|can't recall"
+    r"|cannot recall|name of the|called\?|trying to (?:think|remember)"
+    r"|there(?:'s| is| was) (?:a|this) (?:film|movie|show|series))",
+    re.IGNORECASE,
+)
+
+
+def _sounds_like_recall(question: str) -> bool:
+    return bool(_RECALL.search(question))
+
+
+def _people(title: Title) -> tuple[str | None, list[str]]:
+    """Director and top billing, out of the payload already on the row.
+
+    raw_tmdb carries the whole TMDB detail response, credits included, and
+    none of it ever reached the model. Asked who directed something, it had
+    to guess from a row that contained the answer.
+    """
+    raw = title.raw_tmdb or {}
+    credits = raw.get("credits") or {}
+    director = None
+    for person in credits.get("crew") or []:
+        if person.get("job") == "Director":
+            director = person.get("name")
+            break
+    if director is None and title.type == "tv":
+        creators = raw.get("created_by") or []
+        if creators:
+            director = creators[0].get("name")
+    cast = [p.get("name") for p in (credits.get("cast") or [])[:4] if p.get("name")]
+    return director, cast
+
+
 def _describe(title: Title) -> str:
+    """One catalog line for the prompt.
+
+    Deliberately dense. Everything here is already on the row, and every
+    field left out is a question the model has to either dodge or invent an
+    answer to. The overview is the expensive part, so it is last and
+    truncated; the cheap identifying facts come first.
+    """
     genres = ", ".join(g.get("name", "") for g in (title.genres or []))
-    bits = [f"{title.name} ({title.year or 'year unknown'})"]
+    kind = "series" if title.type == "tv" else "film"
+    bits = [f"{title.name} ({title.year or 'year unknown'}, {kind})"]
     if genres:
         bits.append(genres)
     if title.runtime:
@@ -160,15 +206,45 @@ def _describe(title: Title) -> str:
         bits.append(title.original_language)
     if title.imdb_rating:
         bits.append(f"IMDb {title.imdb_rating}")
+
+    director, cast = _people(title)
+    if director:
+        bits.append(f"dir. {director}")
+    if cast:
+        bits.append("with " + ", ".join(cast))
+    # Franchise membership answers a whole class of question on its own,
+    # and it is one column.
+    if title.collection_name:
+        bits.append(f"part of {title.collection_name}")
+    if title.keywords:
+        bits.append("themes: " + ", ".join(title.keywords[:8]))
+
     line = " | ".join(bits)
     if title.overview:
-        line += f" | {title.overview[:220]}"
+        line += f" | {title.overview[:260]}"
     return line
 
 
 async def _candidates(db: AsyncSession, user: User, question: str) -> list[Title]:
     """Shortlist for the model: what this person would plausibly be told
-    about, chosen by embedding similarity to the question and to them."""
+    about, chosen by embedding similarity to the question and to them.
+
+    Two legs, because they fail in opposite directions. The vector leg is
+    good at "more like this" and hopeless at "the one where a guy relives
+    the same day", which the default lexical encoder scores below random.
+    The full-text leg over TMDB keywords is the reverse: it finds the time
+    loop film immediately and knows nothing about taste. Whichever produced
+    the better answer, it is in the list the model sees.
+    """
+    from app.catalog import plotsearch
+
+    plot_hits: list[Title] = []
+    if _sounds_like_recall(question):
+        try:
+            plot_hits = await plotsearch.find(db, question, limit=12)
+        except Exception:
+            logger.info("plot search unavailable; falling back to the vector leg alone")
+
     settings = await client.require_ai(db)
     question_vector = np.array((await client.embed_texts(db, [question]))[0])
 
@@ -191,7 +267,18 @@ async def _candidates(db: AsyncSession, user: User, question: str) -> list[Title
             .limit(CANDIDATES)
         )
     ).scalars()
-    return list(rows)
+
+    # Plot hits go first: when someone is describing a half-remembered film,
+    # the thing they are describing is the answer, and the taste-blended
+    # neighbours are context around it.
+    out: list[Title] = []
+    seen: set = set()
+    for title in [*plot_hits, *rows]:
+        if title.id in seen:
+            continue
+        seen.add(title.id)
+        out.append(title)
+    return out[:CANDIDATES]
 
 
 async def answer_steps(

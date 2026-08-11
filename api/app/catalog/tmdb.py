@@ -137,6 +137,16 @@ async def details(db: AsyncSession, media_type: str, tmdb_id: int) -> dict:
     return await _http_get(db, f"/{media_type}/{tmdb_id}", {"append_to_response": append})
 
 
+async def search_collection(db: AsyncSession, query: str) -> dict:
+    """Find a franchise by name: "harry potter" to the collection id.
+
+    Separate from search_multi, which only returns films, series and people
+    and will happily return the first Harry Potter film for a query that
+    meant the whole set.
+    """
+    return await _cached_get(db, "/search/collection", {"query": query}, SEARCH_TTL)
+
+
 async def season(db: AsyncSession, tmdb_id: int, season_number: int) -> dict:
     """Every episode of one season, with air dates.
 
