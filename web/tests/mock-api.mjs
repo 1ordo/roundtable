@@ -782,6 +782,27 @@ const server = http.createServer(async (req, res) => {
       results: [COCO_CARD],
     })
   }
+  // Saving a whole franchise, or a set the assistant proposed. Order is
+  // preserved by position, which is what makes a watch-through readable.
+  if (url.pathname === '/api/lists/bulk' && req.method === 'POST') {
+    if (!requireSession(req, res) || !requireCsrf(req, res)) return
+    const body = await readBody(req)
+    const target = body.name
+      ? (store.lists.find((l) => l.name.toLowerCase() === String(body.name).toLowerCase()) ??
+        (store.lists.push({ id: `list-${store.lists.length}`, name: body.name, kind: 'custom', items: [] }),
+         store.lists[store.lists.length - 1]))
+      : store.lists.find((l) => (body.shared ? l.kind === 'shared' : l.kind === 'watchlist'))
+    let added = 0
+    let already = 0
+    for (const t of body.titles ?? []) {
+      if (target.items.some((i) => i.tmdb_id === t.tmdb_id)) already += 1
+      else {
+        target.items.push({ tmdb_id: t.tmdb_id, type: t.type })
+        added += 1
+      }
+    }
+    return json(res, 200, { added, already_there: already, failed: 0, list_name: target.name })
+  }
   if (url.pathname === '/api/titles/movie/354912/similar') {
     if (!requireSession(req, res)) return
     return json(res, 200, { results: [] })

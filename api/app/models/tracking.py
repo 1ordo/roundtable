@@ -49,6 +49,10 @@ class ListItem(Base):
         ForeignKey("titles.id", ondelete="CASCADE"), index=True
     )
     added_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Where this sits in the list. Set when a whole franchise is saved in
+    # release order; null for anything added one at a time, which then falls
+    # back to sorting by when it was added.
+    position: Mapped[int | None] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(String(500))
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

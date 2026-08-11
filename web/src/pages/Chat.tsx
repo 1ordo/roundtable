@@ -6,11 +6,13 @@ import type { TitleCard } from '../api/catalog'
 import { PosterCard } from '../components/PosterCard'
 import { ChatTrace, type Considered, type Step } from '../components/ChatTrace'
 import { BeamMark } from '../components/Wordmark'
+import { SaveProposal, type Proposal } from '../components/SaveProposal'
 
 type Turn = {
   role: 'user' | 'assistant'
   content: string
   results?: TitleCard[]
+  proposal?: Proposal | null
   steps?: Step[]
   considered?: Considered[]
 }
@@ -113,6 +115,7 @@ export function Chat() {
                 role: 'assistant',
                 content: event.reply,
                 results: event.results,
+                proposal: event.proposal,
                 steps: [...collected],
                 considered: shortlist,
               },
@@ -210,6 +213,7 @@ export function Chat() {
                     ))}
                   </div>
                 )}
+                {turn.proposal && <SaveProposal proposal={turn.proposal} />}
               </div>
             )}
           </motion.div>

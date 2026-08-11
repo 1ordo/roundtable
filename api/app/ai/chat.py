@@ -47,9 +47,16 @@ Rules you must follow:
   titles" without naming them.
 
 Return JSON only, shaped exactly:
-{"reply": "<your message naming each pick>", "titles": ["<exact candidate name>", ...]}
+{"reply": "<your message naming each pick>", "titles": ["<exact candidate name>", ...],
+ "list_name": "<a short name, or null>"}
 The titles array repeats the ones you named, in your order, and is empty
-only when you recommended nothing."""
+only when you recommended nothing.
+
+list_name is only for when the person asked for a set worth keeping: a
+franchise in order, everything by one director, a themed run. Two or three
+picks for tonight are not a list. Name it as they would ("Marvel, in order",
+"Studio Ghibli"), never "Recommendations". Use null when in doubt: the
+person is offered a button, and offering it for two films is noise."""
 
 
 def _tidy(text: str) -> str:
@@ -57,6 +64,22 @@ def _tidy(text: str) -> str:
     return (
         text.replace(" — ", ", ").replace(" – ", ", ").replace("—", ", ").replace("–", ", ").strip()
     )
+
+
+def _proposal(list_name: str | None, resolved: list[Title]) -> dict | None:
+    """A named, ordered set the person can save with one press.
+
+    Only offered from three titles up. Two picks for tonight are not a list,
+    and a button under every answer stops being an offer and becomes noise.
+    The contents are the titles the server already resolved, in the order it
+    resolved them, so the model never decides what gets saved.
+    """
+    if not list_name or len(resolved) < 3:
+        return None
+    return {
+        "name": list_name,
+        "titles": [{"tmdb_id": t.tmdb_id, "type": t.type, "name": t.name} for t in resolved],
+    }
 
 
 async def _profile_block(db: AsyncSession, user: User) -> str:
@@ -343,6 +366,7 @@ async def answer_steps(
             "type": "done",
             "reply": "The catalog is empty, so there is nothing for me to suggest yet.",
             "titles": [],
+            "proposal": None,
         }
         return
 
@@ -363,7 +387,12 @@ async def answer_steps(
         "label": "Checking every title it named",
         "detail": result["check"],
     }
-    yield {"type": "done", "reply": result["reply"], "titles": result["titles"]}
+    yield {
+        "type": "done",
+        "reply": result["reply"],
+        "titles": result["titles"],
+        "proposal": result.get("proposal"),
+    }
 
 
 async def answer(
@@ -374,6 +403,7 @@ async def answer(
         return {
             "reply": "The catalog is empty, so there is nothing for me to suggest yet.",
             "titles": [],
+            "proposal": None,
         }
 
     by_name = {t.name.lower(): t for t in candidates}
@@ -395,6 +425,11 @@ async def answer(
     payload = await client.chat_json(db, SYSTEM, prompt, max_tokens=900)
     reply = _tidy(str(payload.get("reply") or ""))
     named = payload.get("titles") or []
+    # A name for the set, when the model judged it worth keeping. The server
+    # decides what is actually in it; this is the only new thing the model
+    # gets to say, and it is a label.
+    list_name = payload.get("list_name")
+    list_name = " ".join(str(list_name).split())[:120] if list_name else None
 
     # Resolve to real rows, dropping anything the model made up.
     resolved: list[Title] = []
@@ -417,7 +452,11 @@ async def answer(
             f"{t.name} ({t.year})" if t.year else t.name for t in resolved
         )
 
-    return {"reply": reply or "I am not sure about that one.", "titles": resolved}
+    return {
+        "reply": reply or "I am not sure about that one.",
+        "titles": resolved,
+        "proposal": _proposal(list_name, resolved),
+    }
 
 
 async def _finish(
@@ -447,6 +486,11 @@ async def _finish(
     payload = await client.chat_json(db, SYSTEM, prompt, max_tokens=900)
     reply = _tidy(str(payload.get("reply") or ""))
     named = payload.get("titles") or []
+    # A name for the set, when the model judged it worth keeping. The server
+    # decides what is actually in it; this is the only new thing the model
+    # gets to say, and it is a label.
+    list_name = payload.get("list_name")
+    list_name = " ".join(str(list_name).split())[:120] if list_name else None
 
     resolved: list[Title] = []
     for name in named:
@@ -477,6 +521,7 @@ async def _finish(
         "reply": reply or "I am not sure about that one.",
         "titles": resolved,
         "check": check,
+        "proposal": _proposal(list_name, resolved),
     }
 
 

@@ -259,9 +259,22 @@ class ChatBody(BaseModel):
     history: list[ChatTurn] = Field(default_factory=list, max_length=20)
 
 
+class ProposedList(BaseModel):
+    """A set the assistant thinks is worth keeping, pending a press.
+
+    Nothing is written until the person confirms: the assistant proposes,
+    the interface asks, and POST /api/lists/bulk does the writing. An
+    assistant that quietly edits somebody's lists is not a feature.
+    """
+
+    name: str
+    titles: list[dict]
+
+
 class ChatResponse(BaseModel):
     reply: str
     results: list[TitleCard]
+    proposal: ProposedList | None = None
 
 
 @router.post("/chat/stream", dependencies=[Depends(csrf_protect)])
@@ -297,6 +310,7 @@ async def chat_stream(
                             "type": "done",
                             "reply": step["reply"],
                             "results": [_card_from_title(t).model_dump() for t in step["titles"]],
+                            "proposal": step.get("proposal"),
                         }
                     else:
                         payload = step
@@ -344,9 +358,11 @@ async def chat(
         raise HTTPException(status_code=502, detail="ai_unavailable") from exc
 
     await db.commit()
+    proposed = result.get("proposal")
     return ChatResponse(
         reply=result["reply"],
         results=[_card_from_title(t) for t in result["titles"]],
+        proposal=ProposedList(**proposed) if proposed else None,
     )
 
 

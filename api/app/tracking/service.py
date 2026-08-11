@@ -32,6 +32,36 @@ async def ensure_shared_list(db: AsyncSession, user: User) -> List:
     return row
 
 
+async def ensure_named_list(db: AsyncSession, user: User, name: str) -> List:
+    """The custom list with this name, made if it is not there yet.
+
+    Case-insensitive, so asking twice for "Marvel" does not end up with two
+    lists differing only in capitals. Trimmed and length-capped because the
+    name can come from a language model.
+    """
+    from sqlalchemy import func as sql_func
+
+    cleaned = " ".join((name or "").split())[:120] or "Saved"
+    row = (
+        (
+            await db.execute(
+                select(List).where(
+                    List.user_id == user.id,
+                    List.kind == "custom",
+                    sql_func.lower(List.name) == cleaned.lower(),
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if row is None:
+        row = List(tenant_id=user.tenant_id, user_id=user.id, name=cleaned, kind="custom")
+        db.add(row)
+        await db.flush()
+    return row
+
+
 # Lists the app makes for its own bookkeeping. They belong to the user, but
 # they are not lists the user made, so they do not belong on My lists where
 # they show up as an unnamed card that cannot be deleted.
@@ -57,7 +87,12 @@ def can_touch_list(user: User, lst: List) -> bool:
 
 
 async def add_title_to_list(
-    db: AsyncSession, lst: List, title_id, user: User, note: str | None = None
+    db: AsyncSession,
+    lst: List,
+    title_id,
+    user: User,
+    note: str | None = None,
+    position: int | None = None,
 ) -> ListItem:
     existing = (
         await db.execute(
@@ -68,7 +103,9 @@ async def add_title_to_list(
         if note is not None:
             existing.note = note
         return existing
-    item = ListItem(list_id=lst.id, title_id=title_id, added_by=user.id, note=note)
+    item = ListItem(
+        list_id=lst.id, title_id=title_id, added_by=user.id, note=note, position=position
+    )
     db.add(item)
     # Saving is one of the four signals the product claims feeds your taste,
     # and it was the one that did not: the vector is built from watch events

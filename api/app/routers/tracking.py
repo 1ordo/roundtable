@@ -57,7 +57,9 @@ async def my_lists(
                     select(Title.poster_path)
                     .join(ListItem, ListItem.title_id == Title.id)
                     .where(ListItem.list_id == lst.id, Title.poster_path.is_not(None))
-                    .order_by(ListItem.added_at.desc())
+                    # Position first for anything saved as an ordered set; the
+                    # rest, added one at a time, keep newest-first.
+                    .order_by(ListItem.position.asc().nullslast(), ListItem.added_at.desc())
                     .limit(3)
                 )
             )

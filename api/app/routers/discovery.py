@@ -218,6 +218,10 @@ async def mark_collection_watched(
 class BulkAddBody(BaseModel):
     titles: list[dict] = Field(min_length=1, max_length=60)
     shared: bool = False
+    # Save into a named list of their own rather than the watchlist. This is
+    # what a franchise or an assistant proposal wants: "Marvel, in order" is
+    # a different thing from the general pile of what to watch next.
+    name: str | None = Field(default=None, max_length=120)
 
 
 class BulkAddResult(BaseModel):
@@ -233,15 +237,28 @@ async def bulk_add(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> BulkAddResult:
-    """Save a whole franchise in one go."""
-    target = (
-        await lists_service.ensure_shared_list(db, user)
-        if body.shared
-        else await lists_service.ensure_watchlist(db, user)
-    )
+    """Save a whole franchise, or a proposed set, in one go.
+
+    Order is preserved. The titles arrive in the order they should be
+    watched, and each gets a position, because a list of eight films that
+    renders newest-first is not a watch-through.
+    """
+    if body.name:
+        target = await lists_service.ensure_named_list(db, user, body.name)
+    elif body.shared:
+        target = await lists_service.ensure_shared_list(db, user)
+    else:
+        target = await lists_service.ensure_watchlist(db, user)
     existing = set(
         (await db.execute(select(ListItem.title_id).where(ListItem.list_id == target.id))).scalars()
     )
+
+    # Continue from wherever the list already ends, so adding a second
+    # franchise does not interleave with the first.
+    highest = (
+        await db.execute(select(func.max(ListItem.position)).where(ListItem.list_id == target.id))
+    ).scalar_one_or_none()
+    position = (highest or 0) + 1
 
     added = already = failed = 0
     for entry in body.titles:
@@ -258,8 +275,9 @@ async def bulk_add(
         if title.id in existing:
             already += 1
             continue
-        await lists_service.add_title_to_list(db, target, title.id, user)
+        await lists_service.add_title_to_list(db, target, title.id, user, position=position)
         existing.add(title.id)
+        position += 1
         added += 1
 
     await audit(
