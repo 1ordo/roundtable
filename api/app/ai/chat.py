@@ -66,6 +66,141 @@ def _tidy(text: str) -> str:
     )
 
 
+# Asking for a franchise, rather than for a recommendation. "marvel movies",
+# "harry potter in order", "what do I watch before the last Spider-Man".
+_ORDERED = re.compile(
+    r"\b(in order|watch order|from a to z|a to z|chronological|where do i start"
+    r"|what order|start watching|in sequence|all the .{0,20}(films|movies))\b",
+    re.IGNORECASE,
+)
+
+
+# Framing to strip before what is left can be used as a franchise name.
+# "harry potter in order" has to become "harry potter" or nothing matches.
+_FRAMING = re.compile(
+    r"\b(i\s*(wanna|want to|would like to)|make me|give me|show me|can you|please"
+    r"|watch|watching|start|starting|see|list|ordered|order|all|every|whole|entire"
+    r"|the|films?|movies?|shows?|series|marathon|a to z|chronological|so i can"
+    r"|where do i|what|is|are|of|from|in|me|my|for|and|with)\b",
+    re.IGNORECASE,
+)
+
+
+def _franchise_query(question: str) -> str:
+    """What is left of a question once the asking is removed."""
+    text = _FRAMING.sub(" ", question)
+    text = re.sub(r"[^\w\s'-]+", " ", text)
+    return " ".join(text.split())
+
+
+def _wants_a_set(question: str) -> bool:
+    """Whether they asked for the whole thing rather than one pick."""
+    return bool(_ORDERED.search(question)) or bool(
+        re.search(r"\b(all|every|whole|entire|list|marathon)\b", question, re.IGNORECASE)
+    )
+
+
+def _franchise_intent(question: str) -> str | None:
+    """The franchise this question is about, or None.
+
+    Two ways in. A universe in the registry is recognised by name, because
+    the MCU is not a TMDB collection and only the registry knows what it is.
+    Anything else is recognised by the shape of the ask: somebody wanting an
+    order or the whole set is asking about a franchise, and the resolver
+    decides whether the leftover words name one. It answers None when they
+    do not, and the caller falls back.
+
+    Deliberately not fired by a mention alone. Asking for something like a
+    Marvel film wants one recommendation, not thirty-nine.
+    """
+    from app.catalog import universes
+
+    if not _wants_a_set(question):
+        return None
+    universe = universes.find(question)
+    if universe is not None:
+        return universe.name
+    leftover = _franchise_query(question)
+    # Two characters of noise is not a franchise name.
+    return leftover if len(leftover) >= 3 else None
+
+
+async def _franchise_answer(db: AsyncSession, user: User, question: str) -> dict[str, Any] | None:
+    """Answer a franchise question from the catalog, not from the model.
+
+    This exists because the alternative was measurably wrong. Asked for the
+    Marvel films in order, the shortlist path offered Where's Waldo, The
+    Mexican and Lord of the Rings, then recommended a DC film, because the
+    default encoder matches shared words and "marvel movies" shares none
+    with anything useful.
+
+    It also lifts the ceiling that shortlist had: the resolver reads TMDB, so
+    it returns the whole franchise whether or not those films are in the
+    local catalog yet. Anything new is ingested so it has a poster and a page
+    to open, which is the difference between naming a film and offering it.
+    """
+    from app.catalog import ingest, tmdb, watch_order
+
+    try:
+        # The extracted name, because a collection lookup on a whole
+        # sentence matches nothing. universes.find still sees the original.
+        from app.catalog import universes as universe_registry
+
+        named = universe_registry.find(question)
+        lookup = question if named is not None else _franchise_query(question)
+        found = await watch_order.resolve(db, query=lookup, user=user)
+    except (tmdb.TmdbNotConfigured, tmdb.TmdbError):
+        return None
+    if found is None or not found.titles:
+        return None
+
+    # Bring anything missing into the catalog so it renders as a real card
+    # rather than a name. Capped: a first ask should not sit through sixty
+    # sequential TMDB calls.
+    resolved: list[Title] = []
+    fetched = 0
+    for entry in found.titles:
+        row = (
+            await db.execute(
+                select(Title).where(Title.tmdb_id == entry.tmdb_id, Title.type == entry.type)
+            )
+        ).scalar_one_or_none()
+        if row is None and fetched < 24:
+            try:
+                row = await ingest.ensure_title(db, entry.type, entry.tmdb_id)
+                fetched += 1
+            except (tmdb.TmdbNotConfigured, tmdb.TmdbError):
+                row = None
+        if row is not None:
+            resolved.append(row)
+
+    if not resolved:
+        return None
+
+    seen = sum(1 for t in found.titles if t.watched)
+    left = len(found.titles) - seen
+    bits = [f"{found.name} in release order, {len(found.titles)} of them."]
+    if seen:
+        bits.append(f"You have seen {seen}, so {left} to go.")
+    first = next((t for t in found.titles if not t.watched), None)
+    if first is not None:
+        bits.append(f"Start with {first.name} ({first.year or 'year unknown'}).")
+    if found.note:
+        bits.append(found.note)
+
+    return {
+        "reply": " ".join(bits),
+        "titles": resolved,
+        "proposal": {
+            "name": found.name,
+            "titles": [
+                {"tmdb_id": t.tmdb_id, "type": t.type, "name": t.name} for t in found.titles
+            ],
+        },
+        "franchise": found,
+    }
+
+
 def _proposal(list_name: str | None, resolved: list[Title]) -> dict | None:
     """A named, ordered set the person can save with one press.
 
@@ -320,11 +455,78 @@ async def answer_steps(
 
     indexed = (await db.execute(select(func.count(TitleEmbedding.title_id)))).scalar_one()
 
+    # A franchise question is not answered the same way as "what should I
+    # watch", so it must not be narrated as though it were. The trace is a
+    # report of what happened; describing a shortlist search that never ran
+    # would make it a decoration.
+    franchise = _franchise_intent(question)
+    if franchise:
+        yield {
+            "type": "step",
+            "key": "read",
+            "label": "Reading your question",
+            "detail": f"a franchise: {franchise}",
+        }
+        yield {
+            "type": "step",
+            "key": "resolve",
+            "label": "Resolving it from the catalog",
+            "detail": "release order, not the model's guess",
+        }
+        answer_out = await _franchise_answer(db, user, question)
+        if answer_out is not None:
+            found = answer_out["franchise"]
+            fresh = len(found.titles) - len([t for t in found.titles if t.watched])
+            yield {
+                "type": "step",
+                "key": "order",
+                "label": "Putting them in order",
+                "detail": f"{len(found.titles)} titles, {fresh} you have not seen",
+            }
+            yield {
+                "type": "candidates",
+                "titles": [
+                    {
+                        "tmdb_id": t.tmdb_id,
+                        "type": t.type,
+                        "name": t.name,
+                        "year": t.year,
+                        "poster_path": t.poster_path,
+                    }
+                    for t in answer_out["titles"][:12]
+                ],
+            }
+            yield {
+                "type": "step",
+                "key": "fetch",
+                "label": "Fetching the ones you do not have",
+                "detail": f"{len(answer_out['titles'])} ready to open",
+            }
+            await db.commit()
+            yield {
+                "type": "done",
+                "reply": answer_out["reply"],
+                "titles": answer_out["titles"],
+                "proposal": answer_out["proposal"],
+            }
+            return
+        yield {
+            "type": "step",
+            "key": "resolve-miss",
+            "label": "Could not resolve that franchise",
+            "detail": "falling back to searching the catalog",
+        }
+
+    recall = _sounds_like_recall(question)
     yield {
         "type": "step",
         "key": "read",
         "label": "Reading your question",
-        "detail": f"{len(question.split())} words",
+        "detail": (
+            f"{len(question.split())} words, sounds like you are trying to place a title"
+            if recall
+            else f"{len(question.split())} words"
+        ),
     }
 
     my_taste = await taste.get_taste(db, user)
@@ -343,8 +545,12 @@ async def answer_steps(
     yield {
         "type": "step",
         "key": "search",
-        "label": "Searching the catalog",
-        "detail": f"{len(candidates)} closest of {indexed} indexed",
+        "label": "Searching what it is about" if recall else "Searching the catalog",
+        "detail": (
+            f"{len(candidates)} of {indexed}, by plot and by similarity"
+            if recall
+            else f"{len(candidates)} closest of {indexed} indexed"
+        ),
     }
     if candidates:
         yield {
@@ -398,6 +604,18 @@ async def answer_steps(
 async def answer(
     db: AsyncSession, user: User, question: str, history: list[dict[str, str]] | None = None
 ) -> dict[str, Any]:
+    # Same franchise short circuit as the narrated path. Two code paths that
+    # answer the same question differently is a bug waiting for whichever one
+    # is less used.
+    if _franchise_intent(question):
+        from_catalog = await _franchise_answer(db, user, question)
+        if from_catalog is not None:
+            return {
+                "reply": from_catalog["reply"],
+                "titles": from_catalog["titles"],
+                "proposal": from_catalog["proposal"],
+            }
+
     candidates = await _candidates(db, user, question)
     if not candidates:
         return {
