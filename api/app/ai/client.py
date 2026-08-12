@@ -52,9 +52,33 @@ async def require_ai(db: AsyncSession) -> AISettings:
     return settings
 
 
+class AIKeyUnreadable(AIError):
+    """A key is stored but this instance cannot decrypt it."""
+
+
 def _headers(settings: AISettings) -> dict[str, str]:
-    key = crypto.decrypt(settings.api_key_enc) if settings.api_key_enc else None
-    return {"Authorization": f"Bearer {key or 'roundtable'}"}
+    """Authorization for the configured endpoint.
+
+    A stored key that will not decrypt is its own failure and says so. The
+    old behaviour sent a placeholder instead, the provider answered 401, and
+    the person saw "chat endpoint returned 401" with no hint that the cause
+    was on this side. The key is sealed with a value derived from
+    RT_SECRET_KEY, so it stops being readable if that changes or if an
+    ai_settings row is copied between instances.
+
+    No key at all is not an error: a local LM Studio or Ollama takes any
+    bearer token, which is why the placeholder exists.
+    """
+    if not settings.api_key_enc:
+        return {"Authorization": "Bearer roundtable"}
+    key = crypto.decrypt(settings.api_key_enc)
+    if key is None:
+        raise AIKeyUnreadable(
+            "the stored AI key cannot be decrypted on this instance, most likely "
+            "because RT_SECRET_KEY changed or the settings came from elsewhere. "
+            "Enter the key again under Admin, AI settings."
+        )
+    return {"Authorization": f"Bearer {key}"}
 
 
 async def embed_texts(db: AsyncSession, texts: list[str]) -> list[list[float]]:
@@ -122,6 +146,8 @@ async def chat_json(
                 raise AIError(f"chat endpoint returned {resp.status_code}")
             content = _text_from(resp.json())
             break
+        except AIKeyUnreadable:
+            raise
         except (AIError, httpx.HTTPError) as exc:
             last = exc
             logger.info("chat_json attempt %s failed: %s", attempt + 1, exc)
@@ -280,6 +306,8 @@ async def chat_text(db: AsyncSession, system: str, user: str, max_tokens: int = 
             if resp.status_code != 200:
                 raise AIError(f"chat endpoint returned {resp.status_code}")
             return _text_from(resp.json())
+        except AIKeyUnreadable:
+            raise
         except (AIError, httpx.HTTPError) as exc:
             last = exc
             logger.info("chat attempt %s failed: %s", attempt + 1, exc)

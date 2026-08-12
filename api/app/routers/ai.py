@@ -72,6 +72,8 @@ async def ai_search(
         outcome = await nlsearch.nl_search(db, user, body.q)
     except ai_client.AIDisabled as exc:
         raise HTTPException(status_code=503, detail="ai_disabled") from exc
+    except ai_client.AIKeyUnreadable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ai_client.AIError as exc:
         raise HTTPException(status_code=502, detail="ai_unavailable") from exc
     await db.commit()
@@ -180,6 +182,8 @@ async def explain_pick(
         text = await ai_client.chat_text(db, EXPLAIN_SYSTEM, prompt, max_tokens=80)
     except ai_client.AIDisabled as exc:
         raise HTTPException(status_code=503, detail="ai_disabled") from exc
+    except ai_client.AIKeyUnreadable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ai_client.AIError as exc:
         raise HTTPException(status_code=502, detail="ai_unavailable") from exc
     return {"explanation": text}
@@ -354,6 +358,8 @@ async def chat(
         )
     except ai_client.AIDisabled as exc:
         raise HTTPException(status_code=503, detail="ai_disabled") from exc
+    except ai_client.AIKeyUnreadable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ai_client.AIError as exc:
         raise HTTPException(status_code=502, detail="ai_unavailable") from exc
 
@@ -424,6 +430,8 @@ async def content_advisory(
         result = await advisories.generate(db, title)
     except ai_client.AIDisabled as exc:
         raise HTTPException(status_code=503, detail="ai_disabled") from exc
+    except ai_client.AIKeyUnreadable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ai_client.AIError as exc:
         raise HTTPException(status_code=502, detail="ai_unavailable") from exc
     await db.commit()

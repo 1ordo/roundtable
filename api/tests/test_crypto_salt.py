@@ -91,3 +91,32 @@ async def test_reading_the_settings_reseals_an_old_key(db_session):
 
     row = (await db_session.execute(select(AISettings))).scalars().first()
     assert crypto.decrypt(row.api_key_enc) == "sk-from-before"
+
+
+async def test_an_unreadable_key_says_so_instead_of_sending_rubbish(db_session):
+    """The reported bug, from the outside. A key that will not decrypt used
+    to become "Bearer roundtable", the provider answered 401, and the person
+    saw "chat endpoint returned 401" with nothing pointing at the real cause,
+    which was on this side all along."""
+    import pytest
+
+    from app.ai import client
+
+    settings = await client.get_ai_settings(db_session)
+    settings.enabled = True
+    settings.api_key_enc = "not something this instance can ever decrypt"
+    await db_session.commit()
+
+    with pytest.raises(client.AIKeyUnreadable) as caught:
+        client._headers(settings)
+    assert "Admin" in str(caught.value), "the message has to say where to fix it"
+
+
+async def test_no_key_at_all_is_not_an_error(db_session):
+    """A local LM Studio or Ollama accepts any bearer token, so an instance
+    with no key configured must keep working."""
+    from app.ai import client
+
+    settings = await client.get_ai_settings(db_session)
+    settings.api_key_enc = None
+    assert client._headers(settings)["Authorization"].startswith("Bearer ")
