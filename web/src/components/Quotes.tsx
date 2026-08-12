@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { ApiError, api } from '../api/client'
+import { useMe } from '../app/useMe'
 
 type Quote = {
   id: string
@@ -23,10 +24,14 @@ function QuoteCard({
   quote,
   onLike,
   onDelete,
+  onFeature,
+  featured,
 }: {
   quote: Quote
   onLike: () => void
   onDelete: () => void
+  onFeature: () => void
+  featured: boolean
 }) {
   return (
     <motion.figure
@@ -76,6 +81,20 @@ function QuoteCard({
               <path d="M12 20s-7-4.5-7-9.5A4 4 0 0 1 12 7a4 4 0 0 1 7 3.5c0 5-7 9.5-7 9.5Z" />
             </svg>
             {quote.likes > 0 ? quote.likes : ''}
+          </button>
+          {/* Any line can be featured, including one that came with the
+              catalog: quoting somebody else's favourite is the normal way a
+              line gets used, and the film is credited either way. */}
+          <button
+            onClick={onFeature}
+            aria-pressed={featured}
+            title={featured ? 'Featured on your profile' : 'Feature this on your profile'}
+            className={clsx(
+              'rounded-[4px] px-2 py-1 font-mono text-[10px] transition-colors',
+              featured ? 'text-ember' : 'text-muted hover:text-ember',
+            )}
+          >
+            {featured ? 'featured' : 'feature'}
           </button>
           {quote.yours && (
             <button
@@ -143,6 +162,20 @@ export function Quotes({
   const like = useMutation({
     mutationFn: (id: string) => api.post(`/api/quotes/${id}/like`),
     onSuccess: refresh,
+  })
+
+  // Which line, if any, this person has above their name. Pressing the one
+  // already featured clears it, so the same control does both.
+  const { data: me } = useMe()
+  const featuredId = (me?.user as { featured_quote_id?: string | null } | undefined)
+    ?.featured_quote_id
+  const feature = useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ featured_quote_id: string | null }>(`/api/quotes/${id}/feature`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['me'] })
+      queryClient.invalidateQueries({ queryKey: ['profile'] })
+    },
   })
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/api/quotes/${id}`),
@@ -276,6 +309,8 @@ export function Quotes({
               quote={quote}
               onLike={() => like.mutate(quote.id)}
               onDelete={() => remove.mutate(quote.id)}
+              onFeature={() => feature.mutate(quote.id)}
+              featured={featuredId === quote.id}
             />
           ))}
         </AnimatePresence>

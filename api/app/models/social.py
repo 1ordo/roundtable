@@ -232,7 +232,10 @@ class Quote(Base, CreatedAtMixin):
     # catalog | user
     source: Mapped[str] = mapped_column(String(10), default="user")
 
-    user: Mapped["User | None"] = relationship()
+    # Two foreign keys now link these tables: this one, and
+    # users.featured_quote_id pointing back. Name the one that means
+    # "who wrote this line".
+    user: Mapped["User | None"] = relationship(foreign_keys=[user_id])
     title: Mapped["Title"] = relationship()
 
 

@@ -23,6 +23,9 @@ class MeUser(BaseModel):
     prefs: dict
     visibility: str = "friends"
     handle: str | None = None
+    # Which line, if any, sits above their name. The title page uses it to
+    # show whether the one in front of you is the featured one.
+    featured_quote_id: str | None = None
     display_name: str | None = None
     # Every country this person follows, the main one first.
     countries: list[str] = []
@@ -50,6 +53,7 @@ async def me(session: Session = Depends(get_current_session)) -> MeResponse:
             prefs=prefs,
             visibility=user.visibility,
             handle=user.handle,
+            featured_quote_id=(str(user.featured_quote_id) if user.featured_quote_id else None),
             display_name=user.display_name,
             countries=all_countries(user),
         ),

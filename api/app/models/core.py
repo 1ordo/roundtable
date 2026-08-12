@@ -37,6 +37,12 @@ class User(Base, CreatedAtMixin):
     email: Mapped[str | None] = mapped_column(String(255), unique=True)
     role: Mapped[str] = mapped_column(String(16), default="member")  # admin | member
     avatar_path: Mapped[str | None] = mapped_column(String(255))
+    # The one line they chose to put at the top of their profile. On the user
+    # rather than as a flag on the quote, so "one each" is the schema saying
+    # it rather than a rule the code has to keep remembering.
+    featured_quote_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("quotes.id", ondelete="SET NULL")
+    )
     country_code: Mapped[str | None] = mapped_column(String(2))
     # Streaming services the user subscribes to, as TMDB provider ids.
     services: Mapped[list] = mapped_column(JSONB, default=list)

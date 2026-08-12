@@ -128,12 +128,19 @@ export type Profile = {
   genres?: { name: string; count: number }[] | null
   favourites?: PostTitle[] | null
   lists?: { id: string; name: string; kind: string; count: number }[] | null
-  quotes?: {
+  featured_line?: {
     id: string
     body: string
     character: string | null
-    title: PostTitle
-  }[] | null
+    title: {
+      tmdb_id: number
+      type: string
+      name: string
+      backdrop_path: string | null
+      poster_path: string | null
+      year: number | null
+    }
+  } | null
   days?: DayCount[] | null
   years?: number[] | null
   streak?: number | null

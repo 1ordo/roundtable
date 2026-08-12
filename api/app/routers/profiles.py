@@ -63,10 +63,10 @@ class ProfileOut(BaseModel):
     genres: list[dict] | None = None
     favourites: list[ProfileTitle] | None = None
     lists: list[ProfileList] | None = None
+    # The one line they put above their name, with the film it is from.
+    featured_line: dict | None = None
     # The same year grid the owner sees on their own stats page, so a
     # profile is a real page rather than three numbers.
-    # Lines they kept, with the film and who says it.
-    quotes: list[dict] | None = None
     days: list[dict] | None = None
     years: list[int] | None = None
     streak: int | None = None
@@ -283,38 +283,37 @@ async def get_profile(
     else:
         hidden.append("lists")
 
-    # Quotes ride with the posts panel: both are things this person wrote.
-    if await can_see_panel(db, viewer, subject, "posts"):
+    # One line, at the top, rather than an inventory of everything they ever
+    # saved. A list of saved lines is a collection; the one they chose to put
+    # above their name is a statement about them, and that is what people
+    # were reaching for.
+    if subject.featured_quote_id and await can_see_panel(db, viewer, subject, "posts"):
         from app.models import Quote
 
-        lines = (
-            (
-                await db.execute(
-                    select(Quote)
-                    .options(joinedload(Quote.title))
-                    .where(Quote.user_id == subject.id)
-                    .order_by(Quote.created_at.desc())
-                    .limit(8)
-                )
+        line = (
+            await db.execute(
+                select(Quote)
+                .options(joinedload(Quote.title))
+                .where(Quote.id == subject.featured_quote_id)
             )
-            .scalars()
-            .all()
-        )
-        out.quotes = [
-            {
-                "id": str(q.id),
-                "body": q.body,
-                "character": q.character,
+        ).scalar_one_or_none()
+        if line is not None:
+            out.featured_line = {
+                "id": str(line.id),
+                "body": line.body,
+                "character": line.character,
                 "title": {
-                    "tmdb_id": q.title.tmdb_id,
-                    "type": q.title.type,
-                    "name": q.title.name,
-                    "poster_path": q.title.poster_path,
-                    "year": q.title.year,
+                    "tmdb_id": line.title.tmdb_id,
+                    "type": line.title.type,
+                    "name": line.title.name,
+                    # The cover is the width of the page, so it needs the
+                    # backdrop rather than the poster. Poster is the fallback
+                    # for the handful of titles with no backdrop at all.
+                    "backdrop_path": line.title.backdrop_path,
+                    "poster_path": line.title.poster_path,
+                    "year": line.title.year,
                 },
             }
-            for q in lines
-        ]
 
     out.hidden = hidden
     await db.commit()

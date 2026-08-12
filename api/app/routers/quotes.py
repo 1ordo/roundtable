@@ -332,3 +332,51 @@ async def remove_quote(
         raise HTTPException(status_code=404, detail="not found")
     await db.execute(delete(Quote).where(Quote.id == qid))
     await db.commit()
+
+
+class FeaturedOut(BaseModel):
+    featured_quote_id: str | None
+
+
+@router.post(
+    "/quotes/{quote_id}/feature",
+    response_model=FeaturedOut,
+    dependencies=[Depends(csrf_protect)],
+)
+async def feature_quote(
+    quote_id: str,
+    viewer: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FeaturedOut:
+    """Put this line at the top of your profile, or take it down.
+
+    Pressing the one already featured clears it, so the same control does
+    both and there is no separate remove.
+
+    Any line you can see may be featured, including one that came with the
+    catalog: quoting somebody else's favourite line is the normal way people
+    use a line, and it is attributed to the film either way.
+    """
+    try:
+        qid = uuid.UUID(quote_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="not found") from exc
+
+    if viewer.featured_quote_id == qid:
+        viewer.featured_quote_id = None
+        await db.commit()
+        return FeaturedOut(featured_quote_id=None)
+
+    quote = (await db.execute(select(Quote).where(Quote.id == qid))).scalar_one_or_none()
+    if quote is None:
+        raise HTTPException(status_code=404, detail="not found")
+    # You can only feature a line you were allowed to read.
+    if (
+        quote.user_id is not None
+        and quote.user_id not in await visibility.visible_user_ids_for_panel(db, viewer, "posts")
+    ):
+        raise HTTPException(status_code=404, detail="not found")
+
+    viewer.featured_quote_id = qid
+    await db.commit()
+    return FeaturedOut(featured_quote_id=str(qid))

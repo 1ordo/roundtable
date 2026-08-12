@@ -1,6 +1,7 @@
 import { motion } from 'motion/react'
 import { Link, useParams } from 'react-router'
 import { img } from '../api/catalog'
+import { FeaturedLineCover } from '../components/FeaturedLine'
 import { nameOf, useProfile, useProfilePosts } from '../api/social2'
 import { PostCard } from '../components/PostCard'
 import { YearGrid } from '../components/YearGrid'
@@ -42,6 +43,7 @@ export function Profile() {
 
   return (
     <div className="mx-auto max-w-2xl">
+      {data.featured_line && <FeaturedLineCover line={data.featured_line} />}
       <header className="mb-8">
         <p className="wd-eyebrow">Together</p>
         <div className="mt-3 flex flex-wrap items-center gap-4">
@@ -179,57 +181,6 @@ export function Profile() {
                 {listing.name}{' '}
                 <span className="font-mono text-xs text-muted">{listing.count}</span>
               </span>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Lines they kept, set against the poster of the film they are from
-          and attributed to whoever says them. */}
-      {data.quotes && data.quotes.length > 0 && (
-        <section className="mt-8">
-          <h2 className="font-display text-2xl font-semibold uppercase tracking-[0.02em]">Lines they keep</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            {data.quotes.map((quote, i) => (
-              <motion.figure
-                key={quote.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(i * 0.05, 0.3) }}
-                className="wd-plate relative flex gap-3 overflow-hidden p-3"
-              >
-                <Link
-                  to={`/app/title/${quote.title.type}/${quote.title.tmdb_id}`}
-                  className="shrink-0"
-                >
-                  {quote.title.poster_path ? (
-                    <img
-                      src={img(quote.title.poster_path, 'w185') ?? ''}
-                      alt={quote.title.name}
-                      loading="lazy"
-                      className="h-24 w-16 rounded-lg object-cover transition-opacity hover:opacity-80"
-                    />
-                  ) : (
-                    <span className="block h-24 w-16 rounded-lg bg-panel-2" />
-                  )}
-                </Link>
-                <div className="flex min-w-0 flex-col justify-center">
-                  <blockquote className="font-display leading-snug">
-                    {quote.body}
-                  </blockquote>
-                  <figcaption className="mt-2 min-w-0">
-                    {quote.character && (
-                      <span className="block truncate font-mono text-[11px] text-ember">
-                        {quote.character}
-                      </span>
-                    )}
-                    <span className="block truncate text-[11px] text-muted">
-                      {quote.title.name}
-                      {quote.title.year ? ` (${quote.title.year})` : ''}
-                    </span>
-                  </figcaption>
-                </div>
-              </motion.figure>
             ))}
           </div>
         </section>
