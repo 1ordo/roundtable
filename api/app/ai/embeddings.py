@@ -112,7 +112,7 @@ async def tag_untagged_titles(db: AsyncSession, limit: int = 300) -> int:
     """
     settings = await client.require_ai(db)
     model = settings.embed_model
-    if model == local_embedding.MODEL_NAME:
+    if local_embedding.is_local(model):
         logger.info("vibe tags need a real embedding model; skipping with the local encoder")
         return 0
     labels = await ensure_label_embeddings(db)

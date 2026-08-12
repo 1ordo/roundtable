@@ -32,6 +32,16 @@ async def get_ai_settings(db: AsyncSession) -> AISettings:
         row = AISettings(tenant_id=tenant.id, enabled=False)
         db.add(row)
         await db.flush()
+    # A key written before the encryption salt was renamed still opens, but
+    # under the old salt. Rewrite it here rather than leaving every read to
+    # fall through the legacy path forever, and so that an operator never has
+    # to know this happened.
+    if row.api_key_enc and crypto.needs_reseal(row.api_key_enc):
+        resealed = crypto.reseal(row.api_key_enc)
+        if resealed:
+            row.api_key_enc = resealed
+            await db.flush()
+            logger.info("re-encrypted the stored AI key under the current salt")
     return row
 
 
@@ -54,7 +64,7 @@ async def embed_texts(db: AsyncSession, texts: list[str]) -> list[list[float]]:
     encoder otherwise, so recommendations never depend on an external
     service being reachable."""
     settings = await require_ai(db)
-    if settings.embed_model == local_embedding.MODEL_NAME or not settings.base_url:
+    if local_embedding.is_local(settings.embed_model) or not settings.base_url:
         return local_embedding.encode_many(texts)
 
     url = f"{settings.base_url.rstrip('/')}/embeddings"

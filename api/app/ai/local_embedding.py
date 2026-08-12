@@ -22,6 +22,19 @@ import unicodedata
 
 DIM = 768
 MODEL_NAME = "roundtable-local-hashed-ngrams-v1"
+# What this encoder was called before the project was renamed. Rows in
+# title_embeddings are keyed by this string, and ai_settings.embed_model
+# stores it, so an instance that predates the rename still has the old value
+# in its database. The migration rewrites both, and this stays so that a
+# database that somehow missed it is still recognised as local rather than
+# sent to an embedding endpoint that does not exist.
+LEGACY_MODEL_NAMES = ("watchdeck-local-hashed-ngrams-v1",)
+
+
+def is_local(model: str | None) -> bool:
+    """Whether this model name means the bundled encoder."""
+    return model == MODEL_NAME or model in LEGACY_MODEL_NAMES
+
 
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 

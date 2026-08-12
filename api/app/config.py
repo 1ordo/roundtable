@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     resend_api_key: str | None = None
     # Must be a domain verified with Resend before anything will send.
     resend_from: str | None = None
+    # Subscribers have this topic saved in their ntfy app, so an instance
+    # that predates the project rename must keep sending to the old one or
+    # push silently stops. Set RT_NTFY_TOPIC_PREFIX=watchdeck- there.
     ntfy_topic_prefix: str = "roundtable-"
 
     @property
