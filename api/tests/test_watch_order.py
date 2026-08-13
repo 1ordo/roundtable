@@ -90,3 +90,41 @@ class TestTheEndpoint:
 
     async def test_it_is_behind_a_login(self, client):
         assert (await client.get("/api/watch-order", params={"q": "marvel"})).status_code == 401
+
+
+class TestPickingTheRightCollection:
+    """Asked for "star wars", the resolver answered with The Ewok Adventures.
+
+    The local table was checked first to save a search, but the check was a
+    substring match with no ordering, so it returned whichever row Postgres
+    reached first. Both of these are honest matches for "star wars" and
+    neither is the franchise anybody meant. Same for "batman", which found
+    The Batman Collection: one film, from 2022.
+    """
+
+    def test_the_collection_actually_called_this_wins(self):
+        candidates = [
+            (133830, "Star Wars: The Ewok Adventures Collection"),
+            (10, "Star Wars Collection"),
+            (302331, "LEGO Star Wars Collection"),
+        ]
+        assert watch_order._exact_match("star wars", candidates) == 10
+
+    def test_a_substring_match_alone_is_not_enough(self):
+        """Nothing here IS "star wars", so the caller has to go and search
+        rather than settle for the nearest row it happens to hold."""
+        candidates = [
+            (133830, "Star Wars: The Ewok Adventures Collection"),
+            (302331, "LEGO Star Wars Collection"),
+        ]
+        assert watch_order._exact_match("star wars", candidates) is None
+
+    def test_the_bookkeeping_word_is_not_part_of_the_name(self):
+        assert watch_order._exact_match("harry potter", [(1241, "Harry Potter Collection")]) == 1241
+
+    def test_matching_ignores_case_and_spacing(self):
+        assert watch_order._exact_match("  STAR   wars ", [(10, "Star Wars Collection")]) == 10
+
+    def test_an_empty_query_matches_nothing(self):
+        """Otherwise a collection named "Collection" would answer for it."""
+        assert watch_order._exact_match("", [(1, "Collection")]) is None

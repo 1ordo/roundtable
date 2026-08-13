@@ -155,3 +155,159 @@ class TestTheTraceDescribesWhatHappened:
             if step.get("type") == "step":
                 keys.append(step["key"])
         assert "resolve-miss" in keys, "it should say it could not, then carry on"
+
+
+class TestNamingAFranchiseIsEnough:
+    """Asked "where and where to watch harry potter?", the assistant answered
+    with The Flash.
+
+    The franchise path existed and was correct, but it only fired on a
+    phrase like "in order" or "all the". A plain "where can I watch X" fell
+    through to the embedding shortlist, which for that question ranked
+    KanColle, Gundam 00, Attack on Titan and Panty & Stocking above Harry
+    Potter, and put Fantastic Beasts and Where to Find Them above it too,
+    because the encoder matched the word "where" out of the framing rather
+    than the subject of the sentence.
+
+    A question that names a franchise is about that franchise however it is
+    phrased, so recognition no longer waits to be told twice.
+    """
+
+    def test_the_question_that_answered_the_flash(self):
+        assert chat._franchise_intent("where and where to watch harry potter?") == "harry potter"
+
+    def test_any_way_of_asking_where(self):
+        for question in (
+            "where to watch harry potter",
+            "how can i watch harry potter",
+            "where is harry potter streaming",
+            "harry potter",
+            "what platform has harry potter",
+        ):
+            assert chat._franchise_intent(question) == "harry potter", question
+
+    def test_a_franchise_named_as_a_comparison_is_still_not_one(self):
+        """The reason the gate existed. Something like Harry Potter wants a
+        film that resembles it, not the eight that are it."""
+        for question in (
+            "something like harry potter",
+            "a film similar to harry potter",
+            "recommend me something like the marvel films",
+            "anything that reminds me of harry potter",
+        ):
+            assert chat._franchise_intent(question) is None, question
+
+    def test_a_franchise_named_as_a_qualifier_on_one_pick_is_not_one(self):
+        for question in (
+            "a marvel film for tonight",
+            "is the new marvel any good",
+            "is harry potter worth watching",
+        ):
+            assert chat._franchise_intent(question) is None, question
+
+    def test_a_question_naming_nothing_survives_the_strip_as_nothing(self):
+        """Generic words are never a franchise name. Without dropping them,
+        "something good" reaches the collection search, which obliges."""
+        for question in (
+            "what should i watch tonight",
+            "something good",
+            "anything good",
+            "recommend me a comedy",
+            "i want something new",
+        ):
+            assert chat._franchise_intent(question) is None, question
+
+    def test_a_sentence_the_strip_could_not_reduce_is_not_a_name(self):
+        """A franchise name is short. A long tail of leftover words means
+        the strip never found one."""
+        assert chat._franchise_intent("has anyone seen my keys around the house lately") is None
+
+
+class TestAnsweringTheWhere:
+    """ "Where can I watch Harry Potter" is a question about services.
+
+    Answering it with eight posters and a sentence about release order is
+    answering a different question. The availability is already in the
+    table next to the titles.
+    """
+
+    async def test_it_names_the_services_and_how_much_each_one_has(
+        self, client, fake_idp, db_session
+    ):
+        from sqlalchemy import select
+
+        from app.ai import chat
+        from app.models import Availability, Title, User
+        from tests.util import LORDO, do_login
+
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        me.country_code = "EG"
+
+        films = []
+        for n in range(3):
+            film = Title(tmdb_id=940_000 + n, type="movie", name=f"Potter {n}")
+            db_session.add(film)
+            films.append(film)
+        await db_session.flush()
+        for film in films:
+            db_session.add(
+                Availability(
+                    title_id=film.id,
+                    country="EG",
+                    provider_id=8,
+                    provider_name="Netflix",
+                    kind="stream",
+                )
+            )
+        # One of the three, so the count has to distinguish it from Netflix.
+        db_session.add(
+            Availability(
+                title_id=films[0].id,
+                country="EG",
+                provider_id=384,
+                provider_name="HBO Max",
+                kind="stream",
+            )
+        )
+        await db_session.commit()
+
+        said = await chat._where_to_watch(db_session, me, films)
+        assert "Netflix has all of them" in said, said
+        assert "HBO Max has 1 of them" in said, said
+
+    async def test_a_rental_is_not_streaming_it(self, client, fake_idp, db_session):
+        """Someone asking where to watch a franchise is asking what carries
+        it, not what will sell it to them one film at a time."""
+        from sqlalchemy import select
+
+        from app.ai import chat
+        from app.models import Availability, Title, User
+        from tests.util import LORDO, do_login
+
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        me.country_code = "EG"
+        film = Title(tmdb_id=941_000, type="movie", name="Rented Only")
+        db_session.add(film)
+        await db_session.flush()
+        db_session.add(
+            Availability(
+                title_id=film.id,
+                country="EG",
+                provider_id=2,
+                provider_name="Apple TV",
+                kind="rent",
+            )
+        )
+        await db_session.commit()
+
+        said = await chat._where_to_watch(db_session, me, [film])
+        assert "Apple TV" not in said
+        assert "None of them are streaming" in said
+
+    def test_only_a_question_about_where_triggers_it(self):
+        assert chat._ASKS_WHERE.search("where can i watch harry potter")
+        assert chat._ASKS_WHERE.search("is harry potter streaming")
+        assert chat._ASKS_WHERE.search("what service has harry potter")
+        assert not chat._ASKS_WHERE.search("harry potter in order")

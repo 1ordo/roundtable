@@ -23,6 +23,7 @@ ordering those by year gives a random order within it.
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 
@@ -100,6 +101,33 @@ def _from_tmdb(item: dict, media_type: str) -> OrderedTitle | None:
         poster_path=item.get("poster_path"),
         overview=item.get("overview") or None,
     )
+
+
+def _bare_name(name: str) -> str:
+    """A collection name with TMDB's bookkeeping word removed."""
+    return " ".join(re.sub(r"\s*collection\s*$", "", name or "", flags=re.I).lower().split())
+
+
+def _exact_match(query: str, candidates: list[tuple[int, str]]) -> int | None:
+    """The collection whose name IS the thing asked for, if one of them is.
+
+    Asked for "star wars", the local table answered with whichever row a
+    substring match happened to reach first, which was The Ewok Adventures
+    Collection: two television films from 1984. Asked for "batman" it
+    answered The Batman Collection, a single film from 2022. Both are
+    honest substring matches and neither is the franchise anybody meant.
+
+    So a local row is only trusted when its name is exactly what was asked
+    for. Anything less goes to the search engine, which ranks these
+    correctly and is one call away.
+    """
+    wanted = " ".join((query or "").lower().split())
+    if not wanted:
+        return None
+    for collection_id, name in candidates:
+        if _bare_name(name) == wanted:
+            return collection_id
+    return None
 
 
 def _sorted(titles: list[OrderedTitle]) -> list[OrderedTitle]:
@@ -202,24 +230,34 @@ async def resolve(
                     name=universe.name, kind="universe", titles=titles, note=universe.note
                 )
 
-    # 2. A TMDB collection, found locally first so a catalog we already have
-    #    does not cost a search.
+    # 2. A TMDB collection, checked locally first so a catalog we already
+    #    have does not cost a search, but only on an exact name.
     if query:
         local = (
-            await db.execute(
-                select(Title.collection_id, Title.collection_name)
-                .where(
-                    Title.collection_id.is_not(None),
-                    Title.collection_name.ilike(f"%{query.strip()}%"),
+            (
+                await db.execute(
+                    select(Title.collection_id, Title.collection_name)
+                    .where(
+                        Title.collection_id.is_not(None),
+                        Title.collection_name.ilike(f"%{query.strip()}%"),
+                    )
+                    .distinct()
+                    .limit(25)
                 )
-                .limit(1)
             )
-        ).first()
-        collection_id = local[0] if local else None
+            .tuples()
+            .all()
+        )
+        collection_id = _exact_match(
+            query, [(row[0], row[1] or "") for row in local if row[0] is not None]
+        )
         if collection_id is None:
             try:
                 results = (await tmdb.search_collection(db, query)).get("results") or []
-                collection_id = results[0].get("id") if results else None
+                named = [(int(r["id"]), str(r.get("name") or "")) for r in results if r.get("id")]
+                # Prefer the one actually called this; otherwise TMDB's own
+                # ranking, which puts the canonical collection first.
+                collection_id = _exact_match(query, named) or (named[0][0] if named else None)
             except (tmdb.TmdbNotConfigured, tmdb.TmdbError):
                 collection_id = None
         if collection_id:

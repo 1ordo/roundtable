@@ -66,63 +66,153 @@ def _tidy(text: str) -> str:
     )
 
 
-# Asking for a franchise, rather than for a recommendation. "marvel movies",
-# "harry potter in order", "what do I watch before the last Spider-Man".
-_ORDERED = re.compile(
-    r"\b(in order|watch order|from a to z|a to z|chronological|where do i start"
-    r"|what order|start watching|in sequence|all the .{0,20}(films|movies))\b",
+# A franchise named as a comparison, or as a qualifier on a single pick,
+# rather than as the subject. "Like Harry Potter" wants something that
+# resembles it; "a marvel film for tonight" wants one film. Answering either
+# with the whole franchise is the wrong answer to the question asked.
+_NOT_THE_FRANCHISE = re.compile(
+    r"\b(like|similar to|similar|resembl\w*|reminds? me|instead of|other than"
+    r"|besides|tonight|any good|worth (it|watching|a watch)|recommend\w*"
+    r"|suggest\w*)\b",
     re.IGNORECASE,
 )
 
 
 # Framing to strip before what is left can be used as a franchise name.
-# "harry potter in order" has to become "harry potter" or nothing matches.
+# "harry potter in order" has to become "harry potter" or nothing matches,
+# and so does "where and where to watch harry potter".
+#
+# Not "who" or "it": Doctor Who and It are real titles, and a strip that
+# eats the name it was meant to find is worse than one that leaves noise.
 _FRAMING = re.compile(
     r"\b(i\s*(wanna|want to|would like to)|make me|give me|show me|can you|please"
     r"|watch|watching|start|starting|see|list|ordered|order|all|every|whole|entire"
     r"|the|films?|movies?|shows?|series|marathon|a to z|chronological|so i can"
-    r"|where do i|what|is|are|of|from|in|me|my|for|and|with)\b",
+    r"|where|how|when|to|do|does|did|should|could|can|i|available|stream|streaming"
+    r"|online|find|there|platform|service|app|has|have|had|got|get|want|wants"
+    r"|wanted|looking|need|what|is|are|of|from|in|on|me|my|for|and|with)\b",
     re.IGNORECASE,
 )
+
+
+# Words that are never part of a franchise name. Without dropping these,
+# "something good" survives the strip and gets looked up as though it were
+# a title, and the collection search obliges with whatever it finds.
+_GENERIC = frozenset(
+    {
+        "something", "anything", "everything", "stuff", "thing", "things",
+        "some", "any", "more", "other", "else", "good", "great", "nice",
+        "fun", "funny", "cool", "interesting", "best", "now", "today",
+        "please", "thanks", "this", "that", "these", "those", "next",
+        "new", "newest", "latest", "old",
+        # A service is where you watch, never what you watch. Not "max":
+        # dropping it would turn "mad max" into "mad".
+        "netflix", "hulu", "hbo", "peacock", "prime", "showtime", "starz",
+        "shahid", "osn", "crunchyroll", "disney+",
+    }
+)  # fmt: skip
+
+# A franchise name is short. A long tail of words left over means the strip
+# never found a name and the question was about something else.
+_MOST_NAME_WORDS = 4
 
 
 def _franchise_query(question: str) -> str:
     """What is left of a question once the asking is removed."""
     text = _FRAMING.sub(" ", question)
     text = re.sub(r"[^\w\s'-]+", " ", text)
-    return " ".join(text.split())
-
-
-def _wants_a_set(question: str) -> bool:
-    """Whether they asked for the whole thing rather than one pick."""
-    return bool(_ORDERED.search(question)) or bool(
-        re.search(r"\b(all|every|whole|entire|list|marathon)\b", question, re.IGNORECASE)
-    )
+    return " ".join(w for w in text.split() if w.lower() not in _GENERIC)
 
 
 def _franchise_intent(question: str) -> str | None:
     """The franchise this question is about, or None.
 
+    Naming one is enough, however the question is phrased. The first version
+    of this demanded a phrase like "in order" or "all the", so "where can i
+    watch harry potter" fell through to the shortlist, and the shortlist
+    ranked KanColle, Gundam and Attack on Titan above Harry Potter because
+    the encoder matched "where" and "watch" rather than the subject. A
+    question that names a franchise is about that franchise whether or not
+    the person spelled out that they wanted the set.
+
     Two ways in. A universe in the registry is recognised by name, because
     the MCU is not a TMDB collection and only the registry knows what it is.
-    Anything else is recognised by the shape of the ask: somebody wanting an
-    order or the whole set is asking about a franchise, and the resolver
-    decides whether the leftover words name one. It answers None when they
-    do not, and the caller falls back.
+    Anything else hands the leftover words to the resolver, which answers
+    None when they do not name a franchise, and the caller falls back.
 
-    Deliberately not fired by a mention alone. Asking for something like a
-    Marvel film wants one recommendation, not thirty-nine.
+    The exception is a franchise named as a comparison or as a qualifier on
+    one pick: something like a Marvel film wants one recommendation, not
+    thirty-nine.
     """
     from app.catalog import universes
 
-    if not _wants_a_set(question):
+    if _NOT_THE_FRANCHISE.search(question):
         return None
     universe = universes.find(question)
     if universe is not None:
         return universe.name
     leftover = _franchise_query(question)
-    # Two characters of noise is not a franchise name.
-    return leftover if len(leftover) >= 3 else None
+    # Two characters of noise is not a franchise name, and neither is a
+    # sentence the strip failed to reduce.
+    if len(leftover) < 3 or len(leftover.split()) > _MOST_NAME_WORDS:
+        return None
+    return leftover
+
+
+# Asking where something streams, rather than what to watch.
+_ASKS_WHERE = re.compile(
+    r"\b(where|which (service|platform|app)|what (service|platform|app)"
+    r"|streaming|stream(ed)? on|available|watch it on)\b",
+    re.IGNORECASE,
+)
+
+
+async def _where_to_watch(db: AsyncSession, user: User, titles: list[Title]) -> str:
+    """Which services carry this set, in the countries this person watches in.
+
+    Named by how much of the set each one covers, because "all eight are on
+    HBO Max" and "one of them is on HBO Max" are different answers and a
+    bare list of every provider that appears anywhere cannot tell them
+    apart.
+    """
+    from collections import Counter
+
+    from app.config import get_settings
+    from app.countries import for_user as countries_for
+    from app.models import Availability
+
+    if not titles:
+        return ""
+    # Their own countries, not the instance's: "where can I watch it" is a
+    # question about where they are.
+    countries = countries_for(user) or [get_settings().default_country]
+    rows = (
+        (
+            await db.execute(
+                select(Availability).where(
+                    Availability.title_id.in_([t.id for t in titles]),
+                    Availability.country.in_(countries),
+                    Availability.kind == "stream",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        return "None of them are streaming where you are, going by what the catalog has."
+
+    # One title counts once per provider however many countries carry it.
+    per_provider: dict[str, set[Any]] = {}
+    for row in rows:
+        per_provider.setdefault(row.provider_name, set()).add(row.title_id)
+    ranked = Counter({name: len(ids) for name, ids in per_provider.items()})
+
+    total = len(titles)
+    parts = []
+    for name, count in ranked.most_common(3):
+        parts.append(f"{name} has {'all' if count == total else count} of them")
+    return "Streaming: " + ", ".join(parts) + "."
 
 
 async def _franchise_answer(db: AsyncSession, user: User, question: str) -> dict[str, Any] | None:
@@ -185,6 +275,13 @@ async def _franchise_answer(db: AsyncSession, user: User, question: str) -> dict
     first = next((t for t in found.titles if not t.watched), None)
     if first is not None:
         bits.append(f"Start with {first.name} ({first.year or 'year unknown'}).")
+    # They asked where, so say where. A list of eight films is not an answer
+    # to "where can I watch Harry Potter", and the availability is already
+    # sitting in the table next to the titles.
+    if _ASKS_WHERE.search(question):
+        where = await _where_to_watch(db, user, resolved)
+        if where:
+            bits.append(where)
     if found.note:
         bits.append(found.note)
 
