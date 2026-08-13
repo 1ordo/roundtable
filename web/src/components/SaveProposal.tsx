@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { api } from '../api/client'
+import { ApiError, api } from '../api/client'
 
 export type Proposal = {
   name: string
@@ -20,11 +20,11 @@ export function SaveProposal({ proposal }: { proposal: Proposal }) {
   const qc = useQueryClient()
   const [saving, setSaving] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
-  const [failed, setFailed] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   async function save() {
     setSaving(true)
-    setFailed(false)
+    setError(null)
     try {
       const out = await api.post<Result>('/api/lists/bulk', {
         name: proposal.name,
@@ -32,8 +32,14 @@ export function SaveProposal({ proposal }: { proposal: Proposal }) {
       })
       setResult(out)
       qc.invalidateQueries({ queryKey: ['lists'] })
-    } catch {
-      setFailed(true)
+    } catch (err) {
+      // Say what went wrong when the server said. This button spent its
+      // first life answering "That did not save. Try again?" to a rejected
+      // body, which would have been rejected identically every time it was
+      // pressed. Only a server fault or a dropped connection is worth a
+      // second press, so only those get offered one.
+      const known = err instanceof ApiError
+      setError(known && err.status < 500 ? err.message : 'That did not save. Try again?')
     } finally {
       setSaving(false)
     }
@@ -59,7 +65,7 @@ export function SaveProposal({ proposal }: { proposal: Proposal }) {
         <span className="text-ember">{proposal.name}</span>, in order?
       </p>
       <div className="flex shrink-0 items-center gap-2">
-        {failed && <span className="text-xs text-danger">That did not save. Try again?</span>}
+        {error && <span className="text-xs text-danger">{error}</span>}
         <button
           type="button"
           onClick={save}

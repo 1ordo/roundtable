@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit import audit
 from app.auth.deps import csrf_protect, get_current_user
 from app.catalog import ingest, tmdb
+from app.catalog import watch_order as resolver  # aliased: a route below owns the plain name
 from app.countries import for_user as countries_for
 from app.db import get_db
 from app.models import Availability, FollowedPerson, List, ListItem, Title, User
@@ -216,7 +217,10 @@ async def mark_collection_watched(
 
 
 class BulkAddBody(BaseModel):
-    titles: list[dict] = Field(min_length=1, max_length=60)
+    # As many as a watch order can contain, not a number of its own. The
+    # franchise resolver is the biggest caller here and a cap below what it
+    # can produce makes its own proposals unsaveable.
+    titles: list[dict] = Field(min_length=1, max_length=resolver.MAX_TITLES)
     shared: bool = False
     # Save into a named list of their own rather than the watchlist. This is
     # what a franchise or an assistant proposal wants: "Marvel, in order" is
@@ -242,6 +246,14 @@ async def bulk_add(
     Order is preserved. The titles arrive in the order they should be
     watched, and each gets a position, because a list of eight films that
     renders newest-first is not a watch-through.
+
+    What we already hold is read in one query rather than one call each.
+    ensure_title refreshes anything older than a day, so routing every entry
+    through it turned a save into a full refresh of the franchise: of the
+    seventy-two titles in the Marvel universe, seventy were already in the
+    catalog and sixty-four of those were stale. Sixty-four sequential TMDB
+    calls, to write rows that needed no network at all. A save is a save; if
+    the catalog is a day out of date, that is not this button's problem.
     """
     if body.name:
         target = await lists_service.ensure_named_list(db, user, body.name)
@@ -260,6 +272,18 @@ async def bulk_add(
     ).scalar_one_or_none()
     position = (highest or 0) + 1
 
+    # Everything we already have, in one round trip. Keyed by type as well
+    # as id because a film and a series can share a TMDB id.
+    wanted = [
+        entry["tmdb_id"]
+        for entry in body.titles
+        if entry.get("type") in ("movie", "tv") and isinstance(entry.get("tmdb_id"), int)
+    ]
+    known: dict[tuple[str, int], Title] = {}
+    if wanted:
+        rows = (await db.execute(select(Title).where(Title.tmdb_id.in_(wanted)))).scalars().all()
+        known = {(row.type, row.tmdb_id): row for row in rows}
+
     added = already = failed = 0
     for entry in body.titles:
         media_type = entry.get("type")
@@ -267,11 +291,15 @@ async def bulk_add(
         if media_type not in ("movie", "tv") or not isinstance(tmdb_id, int):
             failed += 1
             continue
-        try:
-            title = await ingest.ensure_title(db, media_type, tmdb_id)
-        except (tmdb.TmdbError, tmdb.TmdbNotConfigured):
-            failed += 1
-            continue
+        title = known.get((media_type, tmdb_id))
+        if title is None:
+            # Only what we have never seen costs a fetch.
+            try:
+                title = await ingest.ensure_title(db, media_type, tmdb_id)
+            except (tmdb.TmdbError, tmdb.TmdbNotConfigured):
+                failed += 1
+                continue
+            known[(media_type, tmdb_id)] = title
         if title.id in existing:
             already += 1
             continue
@@ -673,8 +701,6 @@ async def watch_order(
     the assistant switched off. The assistant calls the same endpoint and
     writes a sentence around the result rather than producing the list.
     """
-    from app.catalog import watch_order as resolver
-
     if not q and tmdb_id is None:
         raise HTTPException(status_code=422, detail="ask for a franchise by name or by title")
 

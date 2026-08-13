@@ -1,6 +1,11 @@
 """Franchises, people, and the parents guide."""
 
+from datetime import UTC, datetime
+
+from sqlalchemy import select
+
 from app.catalog.ingest import extract_certifications
+from app.models import List, ListItem, Title, User
 from app.routers.discovery import _credit
 from tests.util import LORDO, do_login
 
@@ -165,3 +170,98 @@ async def test_bulk_add_needs_csrf(client, fake_idp):
     await do_login(client, fake_idp, LORDO)
     resp = await client.post("/api/lists/bulk", json={"titles": [{"type": "movie", "tmdb_id": 1}]})
     assert resp.status_code == 403
+
+
+class TestSavingAWholeFranchise:
+    """The assistant proposed 72 Marvel titles and the save refused them.
+
+    Two numbers, picked in two files, that had to agree and did not. The
+    resolver returns up to five pages of twenty for films and again for
+    series; the save capped a request at sixty. Every Marvel proposal the
+    assistant made was unsaveable, and Marvel is the franchise people ask
+    for by name.
+    """
+
+    def test_the_save_accepts_everything_the_resolver_can_propose(self):
+        """The invariant, stated once. Whatever a watch order can contain,
+        a save has to be able to carry, or the assistant offers a button
+        that cannot work."""
+        from app.catalog import watch_order
+        from app.routers.discovery import BulkAddBody
+
+        BulkAddBody(titles=[{"type": "movie", "tmdb_id": n} for n in range(watch_order.MAX_TITLES)])
+
+    async def test_seventy_two_titles_save_without_refetching_any_of_them(
+        self, client, fake_idp, fake_tmdb_http, db_session
+    ):
+        """The size the Marvel universe actually resolves to, and the second
+        half of the same bug: every row was already in the catalog, but
+        ensure_title refreshes anything older than a day, so the save made
+        one TMDB call per title to write rows it already had."""
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        assert me is not None
+
+        stale = datetime(2020, 1, 1, tzinfo=UTC)
+        for n in range(72):
+            db_session.add(
+                Title(
+                    tmdb_id=900_000 + n,
+                    type="movie",
+                    name=f"Marvel Thing {n}",
+                    details_refreshed_at=stale,
+                )
+            )
+        await db_session.commit()
+
+        headers = {"X-CSRF-Token": (await client.get("/api/me")).json()["csrf"]}
+        fake_tmdb_http.clear()
+        resp = await client.post(
+            "/api/lists/bulk",
+            json={
+                "name": "Marvel Cinematic Universe",
+                "titles": [{"type": "movie", "tmdb_id": 900_000 + n} for n in range(72)],
+            },
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["added"] == 72
+        assert body["failed"] == 0
+        assert body["list_name"] == "Marvel Cinematic Universe"
+
+        detail_calls = [p for p in fake_tmdb_http if p.startswith(("/movie/", "/tv/"))]
+        assert detail_calls == [], f"a save should not refresh the catalog, made {detail_calls}"
+
+    async def test_the_order_proposed_is_the_order_saved(
+        self, client, fake_idp, fake_tmdb_http, db_session
+    ):
+        """A watch-through that renders in any other order is not one."""
+        await do_login(client, fake_idp, LORDO)
+        for n in range(3):
+            db_session.add(Title(tmdb_id=910_000 + n, type="movie", name=f"Part {n}"))
+        await db_session.commit()
+
+        headers = {"X-CSRF-Token": (await client.get("/api/me")).json()["csrf"]}
+        await client.post(
+            "/api/lists/bulk",
+            json={
+                "name": "In Order",
+                "titles": [{"type": "movie", "tmdb_id": 910_002 - n} for n in range(3)],
+            },
+            headers=headers,
+        )
+        rows = (
+            (
+                await db_session.execute(
+                    select(Title.tmdb_id)
+                    .join(ListItem, ListItem.title_id == Title.id)
+                    .join(List, List.id == ListItem.list_id)
+                    .where(List.name == "In Order")
+                    .order_by(ListItem.position)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert list(rows) == [910_002, 910_001, 910_000]

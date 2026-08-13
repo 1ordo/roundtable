@@ -68,6 +68,18 @@ export class ApiError extends Error {
   }
 }
 
+/* FastAPI answers a rejected body with a list of complaints, not a string.
+   Read straight into a message it renders as "[object Object]", which tells
+   nobody anything, so take the first complaint's own words instead. */
+function readDetail(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const first = detail[0] as { msg?: unknown } | undefined
+    if (typeof first?.msg === 'string') return first.msg
+  }
+  return null
+}
+
 export async function fetchMe(): Promise<Me | null> {
   const resp = await fetch('/api/me')
   if (resp.status === 401) return null
@@ -89,7 +101,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (!resp.ok) {
     let detail = 'request failed'
     try {
-      detail = ((await resp.json()) as { detail?: string }).detail ?? detail
+      detail = readDetail(((await resp.json()) as { detail?: unknown }).detail) ?? detail
     } catch {
       // response had no JSON body, keep the generic message
     }

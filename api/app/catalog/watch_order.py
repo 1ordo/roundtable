@@ -37,6 +37,18 @@ logger = logging.getLogger("roundtable.watch_order")
 # TMDB pages 20 at a time and the MCU is around 60 entries across films and
 # series. Five pages each is plenty and bounds the cost of a bad query.
 MAX_PAGES = 5
+PER_PAGE = 20
+
+# The most a resolve() can hand back: five pages of twenty, for films and
+# again for series. Anything that consumes a watch order has to accept at
+# least this many.
+#
+# This constant exists because it did not. The save endpoint capped a request
+# at sixty, the Marvel Cinematic Universe resolves to seventy-two, and so the
+# assistant offered a button that could not work for the one franchise people
+# ask for by name. Two ceilings that have to agree should not be two numbers
+# typed in two files.
+MAX_TITLES = MAX_PAGES * PER_PAGE * 2
 
 
 @dataclass
