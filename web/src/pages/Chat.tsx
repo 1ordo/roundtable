@@ -101,15 +101,25 @@ export function Chat() {
   }, [])
 
   useEffect(() => {
-    if (following.current) endRef.current?.scrollIntoView({ block: 'end' })
+    // scrollTo on the window, not scrollIntoView on the sentinel:
+    // scrollIntoView walks every scrollable ancestor, including the
+    // horizontal poster rows, and could land the view somewhere
+    // unexpected. Scrolling the document to its own end cannot.
+    if (following.current) {
+      window.scrollTo({ top: document.documentElement.scrollHeight })
+    }
   }, [turns.length, steps.length, running])
 
   /* Reveal one step at a time. The pace is deliberate rather than tied to
      how fast the work happened: a step that took 4ms still needs long
-     enough on screen to read. */
+     enough on screen to read. But the pace adapts to the backlog. A long
+     answer once queued forty steps at a second each, which meant the
+     person watched a replay for half a minute after the server had
+     already finished. */
   useEffect(() => {
     if (steps.length >= arrived.length) return
-    const gap = steps.length === 0 ? 250 : 900
+    const backlog = arrived.length - steps.length
+    const gap = steps.length === 0 ? 250 : backlog > 4 ? 150 : 900
     const timer = setTimeout(() => {
       setSteps(arrived.slice(0, steps.length + 1))
     }, gap)
@@ -170,7 +180,13 @@ export function Chat() {
           } else if (event.type === 'done') {
             // Hold the answer back until the trace has finished playing, or
             // the reply lands on top of steps still appearing beneath it.
-            const remaining = Math.max(0, collected.length - stepsShownRef.current) * 900
+            // Let the trace catch up a little, but never make the person
+            // wait long for an answer the server already has: the reveal
+            // loop drains a big backlog fast, so a short hold is enough.
+            const remaining = Math.min(
+              2000,
+              Math.max(0, collected.length - stepsShownRef.current) * 300,
+            )
             await new Promise((resolve) => setTimeout(resolve, remaining))
             setTurns((current) => [
               ...current,

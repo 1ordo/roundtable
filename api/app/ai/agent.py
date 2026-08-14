@@ -20,6 +20,7 @@ content arrives fenced as untrusted data. And nothing in this file writes:
 the one write in the whole feature stays behind the person's Save button.
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -59,9 +60,12 @@ You have tools, and you are expected to actually use them:
   answers the question; the app will resolve what you name into real
   cards via search_tmdb, so prefer confirming names there before finishing.
 - Never invent a title, a year, or a streaming service.
-- Work efficiently: franchise_order confirms a whole series in one call
-  where search_tmdb confirms one film; prefer the bulk tool, and do not
-  re-verify what a tool already confirmed.
+- Work efficiently: franchise_order resolves a whole series in one call,
+  and confirm_titles verifies a whole list of names in one call. Never
+  verify titles one by one with search_tmdb when you have more than two;
+  that is what confirm_titles is for. When you need several independent
+  lookups, issue them together in one turn rather than one per turn. Do
+  not re-verify what a tool already confirmed.
 - Anything you already verified and named earlier in this conversation is
   still verified. A follow-up asking to change the list (include all of
   them, drop one, reorder) needs no tools at all: answer directly with the
@@ -149,6 +153,22 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "confirm_titles",
+            "description": "Confirm MANY titles at once against the film database: exact "
+            "names, years, tmdb ids. One call takes up to forty names. Always use this "
+            "instead of repeated search_tmdb calls when you have a list to verify.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "names": {"type": "array", "items": {"type": "string"}, "maxItems": 40}
+                },
+                "required": ["names"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "franchise_order",
             "description": "A franchise resolved to its full release-order list, with what "
             "this person has already seen. Try this first for any 'watch X in "
@@ -205,6 +225,7 @@ LABELS = {
     "search_reddit": "Searching Reddit",
     "read_page": "Reading a page",
     "search_tmdb": "Checking the film database",
+    "confirm_titles": "Confirming the whole list",
     "franchise_order": "Resolving the franchise",
     "search_catalog": "Searching your catalog",
     "movie_by_plot": "Searching by plot",
@@ -266,6 +287,29 @@ async def _execute(db: AsyncSession, user: User, name: str, args: dict) -> tuple
                     }
                 )
             return _fence(hits), f"{args.get('query', '')!s} · {len(hits)} matches"
+        if name == "confirm_titles":
+            names = [str(n) for n in (args.get("names") or [])][:40]
+            confirmed: list[dict[str, Any]] = []
+            for wanted in names:
+                match: dict[str, Any] | None = None
+                try:
+                    payload = await tmdb.search_multi(db, wanted)
+                    for item in (payload.get("results") or [])[:5]:
+                        if item.get("media_type") in ("movie", "tv"):
+                            match = {
+                                "name": item.get("title") or item.get("name"),
+                                "tmdb_id": item.get("id"),
+                                "type": item["media_type"],
+                                "year": str(
+                                    item.get("release_date") or item.get("first_air_date") or ""
+                                )[:4],
+                            }
+                            break
+                except (tmdb.TmdbError, tmdb.TmdbNotConfigured):
+                    match = None
+                confirmed.append({"asked": wanted, "found": match})
+            matched = sum(1 for c in confirmed if c["found"])
+            return _fence(confirmed), f"{matched} of {len(names)} confirmed"
         if name == "franchise_order":
             order = await watch_order.resolve(db, query=str(args.get("name", "")), user=user)
             if order is None:
@@ -471,6 +515,12 @@ async def run(
                 "tool_calls": tool_calls,
             }
         )
+        # Parse the whole round first, then run it. Web fetches never touch
+        # the database, so a round that asks for several runs them
+        # concurrently; catalog tools share one connection and keep their
+        # order. Budget and memo decisions happen in call order either way,
+        # so the trace and the charges are deterministic.
+        parsed = []
         for call in tool_calls:
             function = call.get("function") or {}
             name = str(function.get("name") or "")
@@ -479,29 +529,45 @@ async def run(
             except json.JSONDecodeError:
                 args = {}
             memo_key = f"{name}:{json.dumps(args, sort_keys=True)}"
+            plan: tuple[str, str] | None = None
             if memo_key in remembered:
-                result, detail = remembered[memo_key]
-                detail = f"{detail} · from earlier this answer"
+                cached_result, cached_detail = remembered[memo_key]
+                plan = (cached_result, f"{cached_detail} · from earlier this answer")
             else:
                 calls += 1
                 if calls > MAX_CALLS:
-                    result, detail = (
+                    plan = (
                         _fence({"error": "tool budget spent; answer with what you have"}),
                         "budget spent",
                     )
+            parsed.append((call, name, args, memo_key, plan))
+
+        concurrent = {"search_web", "search_reddit", "read_page"}
+        fetches = {
+            index: asyncio.ensure_future(_execute(db, user, name, args))
+            for index, (_call, name, args, _key, plan) in enumerate(parsed)
+            if plan is None and name in concurrent
+        }
+
+        for index, (call, name, args, memo_key, plan) in enumerate(parsed):
+            if plan is not None:
+                result, detail = plan
+            else:
+                if index in fetches:
+                    result, detail = await fetches[index]
                 else:
                     result, detail = await _execute(db, user, name, args)
-                    remembered[memo_key] = (result, detail)
+                remembered[memo_key] = (result, detail)
             yield {
                 "type": "step",
-                "key": f"tool:{name}:{calls}",
+                "key": f"tool:{name}:{index}:{calls}",
                 "label": LABELS.get(name, name),
                 "detail": detail,
             }
             messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": call.get("id") or f"call_{calls}",
+                    "tool_call_id": call.get("id") or f"call_{index}",
                     "content": result[:8000],
                 }
             )

@@ -379,3 +379,110 @@ class TestRepeatsAreFree:
         repeat = [e for e in events if "from earlier this answer" in e.get("detail", "")]
         assert repeat, "the trace says the repeat cost nothing"
         assert events[-1]["reply"] == "Done."
+
+
+class TestVerifyingALongList:
+    async def test_confirm_titles_checks_a_whole_list_in_one_call(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch, fake_tmdb_http, tmdb_key
+    ):
+        """Watched live on a Pokemon question: thirty-eight search_tmdb
+        calls, one film each, one model round-trip between every pair. A
+        list is one call now, and what is not found is said per name
+        rather than silently missing."""
+        me = await _me(client, fake_idp, db_session)
+
+        script = iter(
+            [
+                _tool_call(
+                    "confirm_titles",
+                    {"names": ["Coco", "Definitely Not A Film", "Third One"]},
+                ),
+                _final("Done.", []),
+            ]
+        )
+
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+            return next(script)
+
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+
+        from app.catalog import tmdb as tmdb_module
+
+        async def fake_search(db, query, page=1):
+            if query == "Coco":
+                return {
+                    "results": [
+                        {
+                            "media_type": "movie",
+                            "id": 354912,
+                            "title": "Coco",
+                            "release_date": "2017-10-20",
+                        }
+                    ]
+                }
+            if query == "Third One":
+                return {
+                    "results": [
+                        {
+                            "media_type": "movie",
+                            "id": 777,
+                            "title": "Third One",
+                            "release_date": "2024-01-01",
+                        }
+                    ]
+                }
+            return {"results": []}
+
+        monkeypatch.setattr(tmdb_module, "search_multi", fake_search)
+
+        events = [e async for e in agent.run(db_session, me, "confirm these")]
+        step = next(e for e in events if e.get("label") == "Confirming the whole list")
+        assert step["detail"] == "2 of 3 confirmed"
+
+
+class TestARoundRunsItsWebCallsTogether:
+    async def test_two_web_fetches_in_one_round_overlap(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """Web fetches are independent reads with no database handle, so a
+        round asking for several must not pay for them one after another."""
+        import asyncio as aio
+
+        me = await _me(client, fake_idp, db_session)
+        in_flight = 0
+        overlapped = False
+
+        async def slow_fetch(query):
+            nonlocal in_flight, overlapped
+            in_flight += 1
+            if in_flight > 1:
+                overlapped = True
+            await aio.sleep(0.05)
+            in_flight -= 1
+            return [{"title": f"about {query}", "url": "https://example.com", "snippet": "x"}]
+
+        monkeypatch.setattr(webtools, "search_web", slow_fetch)
+
+        both = {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": f"c{n}",
+                    "type": "function",
+                    "function": {
+                        "name": "search_web",
+                        "arguments": json.dumps({"query": f"q{n}"}),
+                    },
+                }
+                for n in range(2)
+            ],
+        }
+        script = iter([both, _final("Done.", [])])
+
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+            return next(script)
+
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+        events = [e async for e in agent.run(db_session, me, "anything")]
+        assert events[-1]["reply"] == "Done."
+        assert overlapped, "the two fetches ran at the same time"
