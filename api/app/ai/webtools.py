@@ -31,8 +31,9 @@ import httpx
 
 logger = logging.getLogger("roundtable.webtools")
 
-# Honest about being a bot, specific enough for site operators to act on.
-UA = "RoundtableAssistant/1.0 (self-hosted film tracker; +https://github.com/1ordo/roundtable)"
+# Honest about being a bot. No URL in it: DuckDuckGo answers 403 to any
+# agent string carrying a link, and that one header cost the whole feature.
+UA = "RoundtableAssistant/1.0 (self-hosted film tracker)"
 
 # How much of a page the model gets to read. Enough for an article or a
 # thread; a cap because a page is unbounded and the context window is not.
@@ -136,26 +137,26 @@ async def search_web(query: str) -> list[dict[str, str]]:
 async def search_reddit(query: str) -> list[dict[str, str]]:
     """Reddit search: what people actually say, not what a database stores.
 
-    The public JSON endpoint, which needs no credentials. Each hit carries
-    enough to decide whether the thread is worth reading with read_page.
+    Through the search engine with site:reddit.com, not through Reddit.
+    Reddit answers 403 to every non-browser client now, verified from both
+    servers against search.json, old.reddit and bare thread URLs alike, so
+    the honest route to its content is the one that works: search snippets,
+    which carry the thread titles and enough of the text to be useful.
     """
-    resp = await _get(
-        f"https://www.reddit.com/search.json?q={quote_plus(query)}&limit={RESULTS}&sort=relevance"
-    )
-    try:
-        posts = resp.json().get("data", {}).get("children", [])
-    except json.JSONDecodeError as exc:
-        raise WebUnavailable("reddit answered with something that is not JSON") from exc
+    hits = await search_web(f"site:reddit.com {query}")
     out = []
-    for post in posts[:RESULTS]:
-        data = post.get("data") or {}
+    for hit in hits:
+        parsed = urlparse(hit.get("url", ""))
+        if not (parsed.hostname or "").endswith("reddit.com"):
+            continue
+        parts = [p for p in parsed.path.split("/") if p]
+        subreddit = parts[1] if len(parts) > 1 and parts[0] == "r" else ""
         out.append(
             {
-                "title": str(data.get("title") or "")[:250],
-                "subreddit": str(data.get("subreddit") or ""),
-                "score": str(data.get("score") or 0),
-                "url": f"https://www.reddit.com{data.get('permalink', '')}",
-                "text": str(data.get("selftext") or "")[:400],
+                "title": hit.get("title", "")[:250],
+                "subreddit": subreddit,
+                "url": hit.get("url", ""),
+                "text": hit.get("snippet", "")[:400],
             }
         )
     if not out:
@@ -183,11 +184,17 @@ async def read_page(url: str) -> str:
 
 async def _read_reddit_thread(url: str) -> str:
     bare = url.split("?")[0].rstrip("/")
-    resp = await _get(f"{bare}.json?limit=30")
     try:
+        resp = await _get(f"{bare}.json?limit=30")
         payload = resp.json()
-    except json.JSONDecodeError as exc:
-        raise WebUnavailable("reddit answered with something that is not JSON") from exc
+    except (WebUnavailable, json.JSONDecodeError) as exc:
+        # Reddit blocks non-browser readers wholesale. Say what to do about
+        # it, because this failure reaches the model as a tool result and
+        # "403" alone teaches it nothing.
+        raise WebUnavailable(
+            "reddit refuses automated readers from this server; rely on the "
+            "search_reddit snippets, or read a non-reddit page instead"
+        ) from exc
     if not isinstance(payload, list) or len(payload) < 1:
         raise WebUnavailable("that does not look like a reddit thread")
     bits: list[str] = []
