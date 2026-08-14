@@ -33,17 +33,17 @@ from app.models import Title, User
 
 logger = logging.getLogger("roundtable.agent")
 
-# How many times the model may come back for more tools before it must
-# answer. High enough for search, read, verify, retry; a ceiling because a
-# loop with no ceiling is an outage.
-MAX_ROUNDS = 10
-# And how many tool calls in total, counting parallel calls in one round.
-# Sized by watching a real run: asked about The Nun, the model searched the
-# web, then confirmed each Conjuring film in the database one by one, which
-# is nine calls before it has read anything. Fourteen ran out mid-verify.
-MAX_CALLS = 24
+# Runaway backstops, not rations. These exist so a model stuck in a loop
+# cannot run forever, and they are set far above what any real answer
+# needs: a working question should never feel them. The first version
+# rationed at fourteen calls, a real verification spent exactly that, and
+# a person watched the assistant abandon an answer it had already
+# grounded. Repeated calls are served from memory and cost nothing, so a
+# ceiling this high is safe.
+MAX_ROUNDS = 25
+MAX_CALLS = 60
 # New titles ingested from one answer. A card needs a real row.
-MAX_INGEST = 15
+MAX_INGEST = 30
 
 SYSTEM = """You are the assistant inside Roundtable, a private film and series app.
 You help one person decide what to watch. You are warm, brief, and specific.
@@ -59,9 +59,9 @@ You have tools, and you are expected to actually use them:
   answers the question; the app will resolve what you name into real
   cards via search_tmdb, so prefer confirming names there before finishing.
 - Never invent a title, a year, or a streaming service.
-- Your tool budget is limited. franchise_order confirms a whole series in
-  one call where search_tmdb confirms one film; prefer the bulk tool, and
-  do not re-verify what a tool already confirmed.
+- Work efficiently: franchise_order confirms a whole series in one call
+  where search_tmdb confirms one film; prefer the bulk tool, and do not
+  re-verify what a tool already confirmed.
 - Anything you already verified and named earlier in this conversation is
   still verified. A follow-up asking to change the list (include all of
   them, drop one, reorder) needs no tools at all: answer directly with the
