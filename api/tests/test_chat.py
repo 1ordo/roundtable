@@ -17,22 +17,6 @@ def _fake(name: str, **kw) -> Title:
     )
 
 
-def test_named_titles_use_whole_words():
-    """A short title must not match inside another word."""
-    candidates = [_fake("Her"), _fake("The Attack"), _fake("Paradise Now")]
-    prose = "There are other options; The Attack and Paradise Now stand out."
-    found = [t.name for t in chat._titles_named_in(prose, candidates)]
-    assert found == ["The Attack", "Paradise Now"], "'Her' is not inside 'There' or 'other'"
-
-    assert [t.name for t in chat._titles_named_in("Try Her tonight.", candidates)] == ["Her"]
-
-
-def test_named_titles_keep_reply_order():
-    candidates = [_fake("Parasite"), _fake("Inception")]
-    found = [t.name for t in chat._titles_named_in("First Inception, then Parasite.", candidates)]
-    assert found == ["Inception", "Parasite"]
-
-
 def test_reply_is_house_style():
     assert chat._tidy("Tense — and smart") == "Tense, and smart"
     assert chat._tidy("Tense – and smart") == "Tense, and smart"
@@ -42,20 +26,48 @@ def test_reply_is_house_style():
 async def test_chat_only_returns_real_catalog_titles(
     client, fake_idp, db_session, ai_enabled, monkeypatch
 ):
+    """The agent can discuss anything; it can only SHOW what exists."""
     await _build_catalog(db_session)
-    from app.ai import embeddings
+    from sqlalchemy import select
 
-    await embeddings.embed_missing_titles(db_session)
+    from app.ai import agent
+    from app.ai import client as ai_client
+
+    inception = (
+        await db_session.execute(select(Title).where(Title.name == "Inception"))
+    ).scalar_one()
     await db_session.commit()
 
-    async def fake_chat_json(db, system, user, max_tokens=800):
-        # The model names one real title and one that does not exist.
+    async def scripted(db, messages, tools, max_tokens=1200):
+        # The model answers directly, naming one real title (confirmed by
+        # id) and one that does not exist anywhere.
+        import json
+
         return {
-            "reply": "Try Inception, and also The Invented Film.",
-            "titles": ["Inception", "The Invented Film"],
+            "content": json.dumps(
+                {
+                    "reply": "Try Inception, and also The Invented Film.",
+                    "titles": [
+                        {
+                            "name": "Inception",
+                            "year": 2010,
+                            "tmdb_id": inception.tmdb_id,
+                            "type": "movie",
+                        },
+                        {
+                            "name": "The Invented Film",
+                            "year": None,
+                            "tmdb_id": None,
+                            "type": "movie",
+                        },
+                    ],
+                    "list_name": None,
+                }
+            )
         }
 
-    monkeypatch.setattr(chat.client, "chat_json", fake_chat_json)
+    monkeypatch.setattr(ai_client, "chat_tools", scripted)
+    monkeypatch.setattr(agent.client, "chat_tools", scripted)
 
     await do_login(client, fake_idp, LORDO)
     headers = {"X-CSRF-Token": (await client.get("/api/me")).json()["csrf"]}
@@ -65,6 +77,7 @@ async def test_chat_only_returns_real_catalog_titles(
     names = [r["name"] for r in body["results"]]
     assert names == ["Inception"], "the invented title is dropped"
     assert "Inception" in body["reply"]
+    assert "could not be verified" in body["reply"], "the drop is said, not hidden"
 
 
 async def test_chat_requires_ai(client, fake_idp, db_session):
@@ -109,46 +122,68 @@ def test_fixtures_are_shaped_like_omdb(payload):
     assert payload["imdbID"].startswith("tt")
 
 
-async def test_vague_reply_falls_back_to_the_ranking(
+async def test_an_ungrounded_answer_is_honest_rather_than_padded(
     client, fake_idp, db_session, ai_enabled, monkeypatch
 ):
-    """A reply that promises picks without naming them must still deliver
-    real titles rather than an empty shelf."""
+    """The old design padded a vague reply with the top of the taste
+    ranking, which is how a question about The Nun was answered with
+    Batman & Robin. An answer with no grounds now says so and shows
+    nothing, instead of dressing the ranking up as a result."""
     await _build_catalog(db_session)
-    from app.ai import embeddings
+    from app.ai import agent
+    from app.ai import client as ai_client
 
-    await embeddings.embed_missing_titles(db_session)
-    await db_session.commit()
+    async def vague(db, messages, tools, max_tokens=1200):
+        import json
 
-    async def vague(db, system, user, max_tokens=800):
-        return {"reply": "I found two titles you might enjoy.", "titles": []}
+        return {
+            "content": json.dumps(
+                {
+                    "reply": "I could not verify which films are connected to that one.",
+                    "titles": [],
+                    "list_name": None,
+                }
+            )
+        }
 
-    monkeypatch.setattr(chat.client, "chat_json", vague)
+    monkeypatch.setattr(ai_client, "chat_tools", vague)
+    monkeypatch.setattr(agent.client, "chat_tools", vague)
 
     await do_login(client, fake_idp, LORDO)
     headers = {"X-CSRF-Token": (await client.get("/api/me")).json()["csrf"]}
     body = (
-        await client.post("/api/chat", json={"message": "anything good?"}, headers=headers)
+        await client.post(
+            "/api/chat", json={"message": "everything related to the nun"}, headers=headers
+        )
     ).json()
 
-    assert body["results"], "the answer carries real titles"
-    for card in body["results"]:
-        assert card["name"] in body["reply"], "every card is named in the reply"
+    assert body["results"] == [], "no picks are invented to fill the silence"
+    assert "could not verify" in body["reply"]
 
 
 async def test_a_plain_answer_needs_no_titles(
     client, fake_idp, db_session, ai_enabled, monkeypatch
 ):
+    from app.ai import agent
+    from app.ai import client as ai_client
+
     await _build_catalog(db_session)
-    from app.ai import embeddings
 
-    await embeddings.embed_missing_titles(db_session)
-    await db_session.commit()
+    async def plain(db, messages, tools, max_tokens=1200):
+        import json
 
-    async def plain(db, system, user, max_tokens=800):
-        return {"reply": "Nothing in your catalog is a silent film.", "titles": []}
+        return {
+            "content": json.dumps(
+                {
+                    "reply": "Nothing in your catalog is a silent film.",
+                    "titles": [],
+                    "list_name": None,
+                }
+            )
+        }
 
-    monkeypatch.setattr(chat.client, "chat_json", plain)
+    monkeypatch.setattr(ai_client, "chat_tools", plain)
+    monkeypatch.setattr(agent.client, "chat_tools", plain)
 
     await do_login(client, fake_idp, LORDO)
     headers = {"X-CSRF-Token": (await client.get("/api/me")).json()["csrf"]}

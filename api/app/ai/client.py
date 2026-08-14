@@ -312,3 +312,62 @@ async def chat_text(db: AsyncSession, system: str, user: str, max_tokens: int = 
             last = exc
             logger.info("chat attempt %s failed: %s", attempt + 1, exc)
     raise AIError(str(last) if last else "the model did not answer")
+
+
+async def chat_tools(
+    db: AsyncSession,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    max_tokens: int = 1200,
+) -> dict[str, Any]:
+    """One round of a tool-calling conversation.
+
+    Returns the assistant message as the provider sent it: either it has
+    `tool_calls` for the caller to execute, or `content` with the final
+    answer. The loop around this lives in app.ai.agent; this function only
+    knows how to make one request survive a flaky router.
+
+    Models that cannot call tools answer this request with a 404 or a
+    complaint about the `tools` field. That is reported as its own error
+    rather than a generic failure, because the fix is an admin picking a
+    tool-capable model, not retrying.
+    """
+    settings = await require_ai(db)
+    url = f"{settings.base_url.rstrip('/')}/chat/completions"
+    body = {
+        "model": settings.chat_model,
+        "messages": messages,
+        "tools": tools,
+        "temperature": 0.2,
+        "max_tokens": max_tokens,
+        **_provider_extras(settings),
+    }
+    last: Exception | None = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=180) as http:
+                resp = await http.post(url, json=body, headers=_headers(settings))
+            if resp.status_code != 200:
+                text_body = resp.text[:400]
+                if "tool" in text_body.lower() or "function" in text_body.lower():
+                    raise AIError(
+                        "the configured model does not support tool calling. "
+                        "Pick a tool-capable model under Admin, AI settings."
+                    )
+                raise AIError(f"chat endpoint returned {resp.status_code}")
+            payload = resp.json()
+            choices = payload.get("choices") or []
+            if not choices:
+                raise AIError("the model returned no choices")
+            message = choices[0].get("message") or {}
+            if message.get("tool_calls") or (
+                isinstance(message.get("content"), str) and message["content"].strip()
+            ):
+                return message
+            raise AIError("the model answered with neither text nor a tool call")
+        except AIKeyUnreadable:
+            raise
+        except (AIError, httpx.HTTPError) as exc:
+            last = exc
+            logger.info("chat_tools attempt %s failed: %s", attempt + 1, exc)
+    raise AIError(str(last) if last else "the model did not answer")

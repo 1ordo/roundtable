@@ -614,254 +614,41 @@ async def answer_steps(
             "detail": "falling back to searching the catalog",
         }
 
-    recall = _sounds_like_recall(question)
+    # Everything else goes to the agent: the model with tools, calling
+    # them itself and narrating each call. The trace from here on is the
+    # actual sequence of work, not a script. The fixed five steps this
+    # replaced ended, on a bad day, with "here is what fits best from your
+    # catalog" wrapped around three titles chosen by nothing but embedding
+    # distance to the question, which is how The Nun was answered with
+    # Batman & Robin. An agent that can say "I could not ground this" has
+    # no need for that lie.
+    from app.ai import agent
+
     yield {
         "type": "step",
         "key": "read",
         "label": "Reading your question",
-        "detail": (
-            f"{len(question.split())} words, sounds like you are trying to place a title"
-            if recall
-            else f"{len(question.split())} words"
-        ),
+        "detail": f"{len(question.split())} words, {indexed} titles indexed",
     }
-
-    my_taste = await taste.get_taste(db, user)
-    yield {
-        "type": "step",
-        "key": "taste",
-        "label": "Weighing it against your taste",
-        "detail": (
-            "blended 70 to 30 with your history"
-            if my_taste is not None
-            else "no history yet, going on the question alone"
-        ),
-    }
-
-    candidates = await _candidates(db, user, question)
-    yield {
-        "type": "step",
-        "key": "search",
-        "label": "Searching what it is about" if recall else "Searching the catalog",
-        "detail": (
-            f"{len(candidates)} of {indexed}, by plot and by similarity"
-            if recall
-            else f"{len(candidates)} closest of {indexed} indexed"
-        ),
-    }
-    if candidates:
-        yield {
-            "type": "candidates",
-            "titles": [
-                {
-                    "tmdb_id": t.tmdb_id,
-                    "type": t.type,
-                    "name": t.name,
-                    "year": t.year,
-                    "poster_path": t.poster_path,
-                }
-                for t in candidates[:12]
-            ],
-        }
-
-    if not candidates:
-        yield {
-            "type": "done",
-            "reply": "The catalog is empty, so there is nothing for me to suggest yet.",
-            "titles": [],
-            "proposal": None,
-        }
-        return
-
-    # Deliberately unnamed. Which model answers is an operator setting that
-    # changes without notice, and naming it invites people to judge the
-    # answer by the label. Admins can see it in Admin, AI settings.
-    yield {
-        "type": "step",
-        "key": "ask",
-        "label": "Asking the assistant",
-        "detail": "it may only name titles from the shortlist",
-    }
-
-    result = await _finish(db, user, question, history, candidates)
-    yield {
-        "type": "step",
-        "key": "check",
-        "label": "Checking every title it named",
-        "detail": result["check"],
-    }
-    yield {
-        "type": "done",
-        "reply": result["reply"],
-        "titles": result["titles"],
-        "proposal": result.get("proposal"),
-    }
+    async for event in agent.run(db, user, question, history):
+        yield event
 
 
 async def answer(
     db: AsyncSession, user: User, question: str, history: list[dict[str, str]] | None = None
 ) -> dict[str, Any]:
-    # Same franchise short circuit as the narrated path. Two code paths that
-    # answer the same question differently is a bug waiting for whichever one
-    # is less used.
-    if _franchise_intent(question):
-        from_catalog = await _franchise_answer(db, user, question)
-        if from_catalog is not None:
+    """The final answer alone, for callers that do not stream.
+
+    One implementation, not two: this consumes the same narrated generator
+    the streaming endpoint uses and keeps only the end of it. The previous
+    version was a second copy of the whole pipeline, and the two had
+    already started to disagree.
+    """
+    async for step in answer_steps(db, user, question, history):
+        if step.get("type") == "done":
             return {
-                "reply": from_catalog["reply"],
-                "titles": from_catalog["titles"],
-                "proposal": from_catalog["proposal"],
+                "reply": step["reply"],
+                "titles": step["titles"],
+                "proposal": step.get("proposal"),
             }
-
-    candidates = await _candidates(db, user, question)
-    if not candidates:
-        return {
-            "reply": "The catalog is empty, so there is nothing for me to suggest yet.",
-            "titles": [],
-            "proposal": None,
-        }
-
-    by_name = {t.name.lower(): t for t in candidates}
-    catalog_block = "\n".join(f"- {_describe(t)}" for t in candidates)
-    profile_block = await _profile_block(db, user)
-
-    conversation = ""
-    for turn in (history or [])[-MAX_HISTORY_TURNS:]:
-        role = "Person" if turn.get("role") == "user" else "You"
-        conversation += f"{role}: {turn.get('content', '')}\n"
-
-    prompt = (
-        f"ABOUT THIS PERSON:\n{profile_block}\n\n"
-        f"CANDIDATES (the only titles you may name):\n{catalog_block}\n\n"
-        f"{'CONVERSATION SO FAR:' + chr(10) + conversation + chr(10) if conversation else ''}"
-        f"THEIR MESSAGE:\n{question}"
-    )
-
-    payload = await client.chat_json(db, SYSTEM, prompt, max_tokens=900)
-    reply = _tidy(str(payload.get("reply") or ""))
-    named = payload.get("titles") or []
-    # A name for the set, when the model judged it worth keeping. The server
-    # decides what is actually in it; this is the only new thing the model
-    # gets to say, and it is a label.
-    list_name = payload.get("list_name")
-    list_name = " ".join(str(list_name).split())[:120] if list_name else None
-
-    # Resolve to real rows, dropping anything the model made up.
-    resolved: list[Title] = []
-    for name in named:
-        match = by_name.get(str(name).strip().lower())
-        if match is not None and match not in resolved:
-            resolved.append(match)
-    if len(named) != len(resolved):
-        logger.info("dropped %d unmatched title(s) from the reply", len(named) - len(resolved))
-
-    if not resolved and reply:
-        resolved = _titles_named_in(reply, candidates)
-
-    if not resolved and _sounds_like_a_recommendation(reply):
-        # The model said it had picks but never named one. Rather than show
-        # an answer with nothing behind it, answer from the ranking, which
-        # is what actually decides the order anyway.
-        resolved = candidates[:3]
-        reply = "Here is what fits best from your catalog: " + ", ".join(
-            f"{t.name} ({t.year})" if t.year else t.name for t in resolved
-        )
-
-    return {
-        "reply": reply or "I am not sure about that one.",
-        "titles": resolved,
-        "proposal": _proposal(list_name, resolved),
-    }
-
-
-async def _finish(
-    db: AsyncSession,
-    user: User,
-    question: str,
-    history: list[dict[str, str]] | None,
-    candidates: list[Title],
-) -> dict[str, Any]:
-    """The model call and the verification, shared by both entry points."""
-    by_name = {t.name.lower(): t for t in candidates}
-    catalog_block = "\n".join(f"- {_describe(t)}" for t in candidates)
-    profile_block = await _profile_block(db, user)
-
-    conversation = ""
-    for turn in (history or [])[-MAX_HISTORY_TURNS:]:
-        role = "Person" if turn.get("role") == "user" else "You"
-        conversation += f"{role}: {turn.get('content', '')}\n"
-
-    prompt = (
-        f"ABOUT THIS PERSON:\n{profile_block}\n\n"
-        f"CANDIDATES (the only titles you may name):\n{catalog_block}\n\n"
-        f"{'CONVERSATION SO FAR:' + chr(10) + conversation + chr(10) if conversation else ''}"
-        f"THEIR MESSAGE:\n{question}"
-    )
-
-    payload = await client.chat_json(db, SYSTEM, prompt, max_tokens=900)
-    reply = _tidy(str(payload.get("reply") or ""))
-    named = payload.get("titles") or []
-    # A name for the set, when the model judged it worth keeping. The server
-    # decides what is actually in it; this is the only new thing the model
-    # gets to say, and it is a label.
-    list_name = payload.get("list_name")
-    list_name = " ".join(str(list_name).split())[:120] if list_name else None
-
-    resolved: list[Title] = []
-    for name in named:
-        match = by_name.get(str(name).strip().lower())
-        if match is not None and match not in resolved:
-            resolved.append(match)
-    dropped = len(named) - len(resolved)
-
-    if not resolved and reply:
-        resolved = _titles_named_in(reply, candidates)
-
-    fell_back = False
-    if not resolved and _sounds_like_a_recommendation(reply):
-        resolved = candidates[:3]
-        fell_back = True
-        reply = "Here is what fits best from your catalog: " + ", ".join(
-            f"{t.name} ({t.year})" if t.year else t.name for t in resolved
-        )
-
-    if fell_back:
-        check = "it named none, so these come straight from the ranking"
-    elif dropped > 0:
-        check = f"{len(resolved)} found, {dropped} dropped as not in your catalog"
-    else:
-        check = f"all {len(resolved)} are in your catalog"
-
-    return {
-        "reply": reply or "I am not sure about that one.",
-        "titles": resolved,
-        "check": check,
-        "proposal": _proposal(list_name, resolved),
-    }
-
-
-RECOMMENDING = ("recommend", "suggest", "you might", "found", "here are", "try ", "watch")
-
-
-def _sounds_like_a_recommendation(reply: str) -> bool:
-    lowered = reply.lower()
-    return any(phrase in lowered for phrase in RECOMMENDING)
-
-
-def _titles_named_in(reply: str, candidates: list[Title]) -> list[Title]:
-    """Recover picks from prose when the model skips the array.
-
-    Matching is on whole words, so a short title like "Her" is not found
-    inside "other" or "there"."""
-    lowered = reply.lower()
-    found: list[tuple[int, Title]] = []
-    # Longest first so "Dune: Part Two" wins over "Dune".
-    for candidate in sorted(candidates, key=lambda t: -len(t.name)):
-        pattern = re.compile(rf"(?<!\w){re.escape(candidate.name.lower())}(?!\w)")
-        match = pattern.search(lowered)
-        if match and all(candidate is not existing for _, existing in found):
-            found.append((match.start(), candidate))
-        if len(found) == 4:
-            break
-    found.sort(key=lambda pair: pair[0])
-    return [title for _, title in found]
+    raise client.AIError("the assistant produced no answer")

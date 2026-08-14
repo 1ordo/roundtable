@@ -150,6 +150,22 @@ class TestTheTraceDescribesWhatHappened:
 
         monkeypatch.setattr(watch_order, "resolve", nothing)
 
+        # The fallback is now the agent, so give it a scripted final answer.
+        import json
+
+        from app.ai import agent
+        from app.ai import client as ai_client
+
+        async def scripted(db, messages, tools, max_tokens=1200):
+            return {
+                "content": json.dumps(
+                    {"reply": "I could not resolve that set.", "titles": [], "list_name": None}
+                )
+            }
+
+        monkeypatch.setattr(ai_client, "chat_tools", scripted)
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+
         keys = []
         async for step in chat.answer_steps(db_session, user, "marvel movies in order"):
             if step.get("type") == "step":
