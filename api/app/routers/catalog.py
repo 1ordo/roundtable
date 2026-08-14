@@ -17,6 +17,7 @@ from app.auth.deps import get_current_user
 from app.catalog import bootstrap, genre_map, ingest, local, omdb, omdb_source, tmdb
 from app.catalog.providers import click_out_url
 from app.config import get_settings
+from app.countries import for_user as countries_for
 from app.db import get_db
 from app.models import Availability, FollowedPerson, Title, User
 
@@ -908,18 +909,22 @@ def _cast(raw: dict | None, limit: int = 12) -> list[CastMember]:
     ]
 
 
-async def _tenant_countries(db: AsyncSession, user: User) -> list[str]:
-    """The user's country first, then everyone else's, then the fallback."""
-    rows = (await db.execute(select(User.country_code, User.id))).all()
-    ordered: list[str] = []
-    if user.country_code:
-        ordered.append(user.country_code)
-    for country, _uid in rows:
-        if country and country not in ordered:
-            ordered.append(country)
-    if not ordered:
-        ordered.append(get_settings().default_country)
-    return ordered
+def _where_they_watch(user: User) -> list[str]:
+    """The countries this person actually asked about.
+
+    This used to be their country plus every other account's on the
+    instance, which was wrong in both directions at once. Somebody in Egypt
+    who had added Britain and the United States saw neither, because their
+    own choices were never consulted, and did see Morocco, because another
+    user lives there. Every Marvel film sat in the table marked Disney Plus
+    under GB and US and the page never asked for those rows.
+
+    app.countries.for_user is the one answer to this question, and the
+    settings page promises exactly it: "availability, cinema listings and
+    release alerts all widen to cover these". Six other callers already used
+    it; this was the one that did not.
+    """
+    return countries_for(user) or [get_settings().default_country]
 
 
 @router.get("/titles/{media_type}/{tmdb_id}", response_model=TitleDetail)
@@ -940,7 +945,7 @@ async def title_detail(
 
     await omdb.refresh_title_scores(db, title)
 
-    countries = await _tenant_countries(db, user)
+    countries = _where_they_watch(user)
     # Explicit query: the async session cannot lazy-load the relationship.
     entries = (
         (
