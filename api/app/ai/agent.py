@@ -83,7 +83,9 @@ The reply must name every title in the titles array. If you could not
 ground an answer, say plainly what you found and what you are unsure of,
 with an empty titles array; never present a guess as a result.
 list_name is only for a set worth keeping (a franchise in order, a themed
-run), named as the person would name it, null when in doubt.
+run), named as the person would name it, null when in doubt. But when the
+person explicitly asks for a list ("make me a list", "put them in a list",
+"save these"), that doubt is settled: always set list_name then.
 Reply in the language the person wrote in. No emojis. No em dashes."""
 
 
