@@ -319,6 +319,7 @@ async def chat_tools(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]],
     max_tokens: int = 1200,
+    tool_choice: str | None = None,
 ) -> dict[str, Any]:
     """One round of a tool-calling conversation.
 
@@ -342,6 +343,10 @@ async def chat_tools(
         "max_tokens": max_tokens,
         **_provider_extras(settings),
     }
+    if tool_choice is not None:
+        # "none" forces a text answer: used when the tool budget is spent,
+        # because a model that may still call tools will keep calling them.
+        body["tool_choice"] = tool_choice
     last: Exception | None = None
     for attempt in range(3):
         try:

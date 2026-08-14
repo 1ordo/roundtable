@@ -38,7 +38,7 @@ async def test_chat_only_returns_real_catalog_titles(
     ).scalar_one()
     await db_session.commit()
 
-    async def scripted(db, messages, tools, max_tokens=1200):
+    async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
         # The model answers directly, naming one real title (confirmed by
         # id) and one that does not exist anywhere.
         import json
@@ -133,7 +133,7 @@ async def test_an_ungrounded_answer_is_honest_rather_than_padded(
     from app.ai import agent
     from app.ai import client as ai_client
 
-    async def vague(db, messages, tools, max_tokens=1200):
+    async def vague(db, messages, tools, max_tokens=1200, tool_choice=None):
         import json
 
         return {
@@ -169,7 +169,7 @@ async def test_a_plain_answer_needs_no_titles(
 
     await _build_catalog(db_session)
 
-    async def plain(db, messages, tools, max_tokens=1200):
+    async def plain(db, messages, tools, max_tokens=1200, tool_choice=None):
         import json
 
         return {

@@ -54,7 +54,7 @@ class TestTheLoop:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200):
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -92,7 +92,7 @@ class TestTheLoop:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200):
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
             for message in messages:
                 if message.get("role") == "tool":
                     seen_by_model.append(message["content"])
@@ -117,7 +117,7 @@ class TestTheLoop:
         me = await _me(client, fake_idp, db_session)
         rounds = 0
 
-        async def always_hungry(db, messages, tools, max_tokens=1200):
+        async def always_hungry(db, messages, tools, max_tokens=1200, tool_choice=None):
             nonlocal rounds
             rounds += 1
             return _tool_call("search_catalog", {"query": "more"}, call_id=f"c{rounds}")
@@ -141,7 +141,7 @@ class TestTheLoop:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200):
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -158,7 +158,7 @@ class TestTheAnswerIsGrounded:
         db_session.add(real)
         await db_session.commit()
 
-        async def scripted(db, messages, tools, max_tokens=1200):
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
             return _final(
                 "Watch Coco, and Definitely Not A Film.",
                 [
@@ -189,7 +189,7 @@ class TestTheAnswerIsGrounded:
             db_session.add(Title(tmdb_id=970_000 + n, type="movie", name=name, year=2000 + n))
         await db_session.commit()
 
-        async def scripted(db, messages, tools, max_tokens=1200):
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
             return _final(
                 "First One, Second One, then Third One.",
                 [
@@ -224,7 +224,7 @@ class TestTheWebCannotUseTheAgent:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200):
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
             for message in messages:
                 if message.get("role") == "tool":
                     handed_over.append(message["content"])
@@ -279,3 +279,65 @@ class TestReadingTheWeb:
         assert "Conjuring 2" in text
         assert "evil" not in text, "scripts are not content"
         assert ".a{}" not in text, "styles are not content"
+
+
+class TestAModelThatDies:
+    async def test_a_model_failing_mid_loop_ends_the_answer_not_the_stream(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """Watched live: after its budget ran out, the model answered with
+        nothing at all, three times, and the whole stream died with an
+        exception. The trace above the failure was real work; the person
+        should get the honest "could not finish" instead of a broken pipe."""
+        from app.ai.client import AIError
+
+        me = await _me(client, fake_idp, db_session)
+        script = iter([_tool_call("search_catalog", {"query": "x"})])
+
+        async def dies_after_one(db, messages, tools, max_tokens=1200, tool_choice=None):
+            try:
+                return next(script)
+            except StopIteration:
+                raise AIError("the model answered with neither text nor a tool call") from None
+
+        monkeypatch.setattr(agent.client, "chat_tools", dies_after_one)
+        events = [e async for e in agent.run(db_session, me, "anything")]
+        done = events[-1]
+        assert done["type"] == "done", "the stream still ends with an answer"
+        assert done["titles"] == []
+        assert "could not" in done["reply"].lower()
+
+    async def test_a_spent_budget_forces_a_text_answer(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """Once the budget is gone the model is called with tools switched
+        off, because a model still offered tools keeps reaching for them."""
+        me = await _me(client, fake_idp, db_session)
+        choices_seen: list[str | None] = []
+        counter = 0
+
+        async def hungry_then_final(db, messages, tools, max_tokens=1200, tool_choice=None):
+            nonlocal counter
+            choices_seen.append(tool_choice)
+            if tool_choice == "none":
+                return _final("Done with what I had.", [])
+            counter += 1
+            return {
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"c{counter}-{n}",
+                        "type": "function",
+                        "function": {
+                            "name": "search_catalog",
+                            "arguments": json.dumps({"query": f"q{counter}-{n}"}),
+                        },
+                    }
+                    for n in range(8)
+                ],
+            }
+
+        monkeypatch.setattr(agent.client, "chat_tools", hungry_then_final)
+        events = [e async for e in agent.run(db_session, me, "anything")]
+        assert events[-1]["reply"] == "Done with what I had."
+        assert "none" in choices_seen, "tools were withdrawn once the budget was spent"
