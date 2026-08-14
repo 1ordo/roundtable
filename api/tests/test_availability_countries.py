@@ -156,3 +156,176 @@ class TestTheFallbackIsARealCountry:
         countries = _where_they_watch(me)
         assert countries, "never an empty list"
         assert all(len(c) == 2 for c in countries), countries
+
+
+class TestAServiceTheSourceHasNeverHeardOfHere:
+    """ "My Disney is Egyptian."
+
+    TMDB does not list Disney Plus as operating in Egypt. Not "this film is
+    not on it" — the provider is absent from the region entirely, alongside
+    Saudi Arabia and the UAE, where it lists OSN+ instead. Egypt is not a
+    blank spot generally: eighteen thousand availability rows, Netflix with
+    two and a half thousand. It is Disney Plus specifically that the source
+    does not model there, with two rows across the whole catalog.
+
+    So the app told somebody holding an Egyptian Disney Plus subscription
+    that no Marvel film was on any service they had, and cut those films
+    from their own recommendations, on the strength of a hole in a dataset.
+    Absence of data is not evidence of absence, and the person who pays the
+    subscription knows better than we do.
+    """
+
+    async def test_a_service_listed_in_your_country_is_filtered_normally(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key
+    ):
+        """Netflix in the United States is well covered, so a missing row
+        there is a real answer and the country still applies."""
+        from app.catalog import coverage
+
+        assert await coverage.unlisted_services(db_session, ["US"], [8]) == set()
+
+    async def test_a_service_the_region_does_not_list_is_unknown_not_absent(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key, monkeypatch
+    ):
+        from app.catalog import coverage, tmdb
+
+        async def only_local(db, country):
+            # What TMDB actually answers for Egypt: OSN+ and Shahid, no
+            # Disney Plus anywhere in the list.
+            return {
+                "results": [
+                    {"provider_id": 8, "provider_name": "Netflix"},
+                    {"provider_id": 629, "provider_name": "OSN+"},
+                ]
+            }
+
+        monkeypatch.setattr(tmdb, "provider_list", only_local)
+        unlisted = await coverage.unlisted_services(db_session, ["EG"], [8, 337, 629])
+        assert unlisted == {337}, "Disney Plus is unknown in Egypt; the other two are not"
+
+    async def test_one_country_that_lists_it_is_enough(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key
+    ):
+        """Somebody with Egypt and Britain can be told honestly where
+        Disney Plus does and does not carry something, so nothing is
+        widened for them."""
+        from app.catalog import coverage
+
+        assert await coverage.unlisted_services(db_session, ["EG", "GB"], [337]) == set()
+
+    async def test_a_source_outage_widens_nothing(self, client, fake_idp, db_session, monkeypatch):
+        """A failed lookup must not be read as "no providers here", or every
+        service anybody owns silently becomes unfiltered."""
+        from app.catalog import coverage, tmdb
+
+        async def broken(db, country):
+            raise tmdb.TmdbError("upstream down")
+
+        monkeypatch.setattr(tmdb, "provider_list", broken)
+        assert await coverage.unlisted_services(db_session, ["EG"], [8, 337]) == set()
+
+    async def test_an_empty_provider_list_is_a_broken_answer(
+        self, client, fake_idp, db_session, monkeypatch
+    ):
+        """No country has zero services. Believing one does would mark every
+        service the person owns as unknown."""
+        from app.catalog import coverage, tmdb
+
+        async def empty(db, country):
+            return {"results": []}
+
+        monkeypatch.setattr(tmdb, "provider_list", empty)
+        assert await coverage.unlisted_services(db_session, ["EG"], [8, 337]) == set()
+
+    async def test_the_shelf_filter_drops_the_country_for_such_a_service(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key, monkeypatch
+    ):
+        from app.ai import rails
+        from app.catalog import tmdb
+
+        async def no_disney(db, country):
+            return {"results": [{"provider_id": 8, "provider_name": "Netflix"}]}
+
+        monkeypatch.setattr(tmdb, "provider_list", no_disney)
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        me.country_code = "EG"
+        me.services = [8, 337]
+        me.prefs = {"only_my_services": True}
+        await db_session.commit()
+
+        got = await rails._service_filter(db_session, me)
+        assert got is not None
+        assert got.providers == [8], "Netflix is covered in Egypt, so it keeps the country"
+        assert got.countries == ["EG"]
+        assert got.anywhere == [337], "Disney Plus matches without a country"
+        assert got.matches_anything
+
+    async def test_the_title_page_shows_it_and_says_it_is_not_a_local_listing(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key, monkeypatch
+    ):
+        """The whole complaint, end to end."""
+        from app.catalog import tmdb
+
+        async def no_disney(db, country):
+            return {"results": [{"provider_id": 8, "provider_name": "Netflix"}]}
+
+        monkeypatch.setattr(tmdb, "provider_list", no_disney)
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        me.country_code = "EG"
+        me.prefs = {}
+        me.services = [337]
+        await a_marvel_film(db_session)
+        film = (await db_session.execute(select(Title).where(Title.tmdb_id == 1726))).scalar_one()
+        db_session.add(
+            Availability(
+                title_id=film.id,
+                country="US",
+                provider_id=337,
+                provider_name="Disney Plus",
+                kind="stream",
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/titles/movie/1726")
+        assert resp.status_code == 200, resp.text
+        egypt = resp.json()["availability"]["EG"]
+        disney = [p for p in egypt if p["provider_name"] == "Disney Plus"]
+        assert disney, "they pay for it and it carries the film; do not tell them it is nowhere"
+        assert disney[0]["unlisted_locally"] is True, "shown, but not claimed as a local listing"
+        assert [p for p in egypt if p["provider_name"] == "Apple TV Store"], "real rows stay"
+
+    async def test_a_service_they_do_not_pay_for_is_not_conjured_up(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key, monkeypatch
+    ):
+        """This leans on the person's own subscription. Without that claim
+        there is nothing to prefer over the data."""
+        from app.catalog import tmdb
+
+        async def no_disney(db, country):
+            return {"results": [{"provider_id": 8, "provider_name": "Netflix"}]}
+
+        monkeypatch.setattr(tmdb, "provider_list", no_disney)
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        me.country_code = "EG"
+        me.prefs = {}
+        me.services = []
+        await a_marvel_film(db_session)
+        film = (await db_session.execute(select(Title).where(Title.tmdb_id == 1726))).scalar_one()
+        db_session.add(
+            Availability(
+                title_id=film.id,
+                country="US",
+                provider_id=337,
+                provider_name="Disney Plus",
+                kind="stream",
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/titles/movie/1726")
+        egypt = resp.json()["availability"]["EG"]
+        assert not [p for p in egypt if p["provider_name"] == "Disney Plus"]

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
-from sqlalchemy import select, text
+from sqlalchemy import ColumnElement, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer
@@ -298,13 +298,35 @@ def blend_tastes(tastes: list[np.ndarray], weights: list[float] | None = None) -
     return total / norm if norm else total
 
 
+@dataclass(frozen=True)
+class ServiceFilter:
+    """Which services to keep a suggestion for, and where they count.
+
+    Two lists because they are answered by different evidence. `providers`
+    are services the source lists in this person's countries, so a missing
+    row there is a real absence and the country condition is meaningful.
+    `anywhere` are services it does not list in their countries at all: no
+    country condition can be applied to a service the data has never heard
+    of in that region, and applying one anyway removed every Disney Plus
+    title from anybody watching from Egypt.
+    """
+
+    providers: list[int]
+    countries: list[str]
+    anywhere: list[int]
+
+    @property
+    def matches_anything(self) -> bool:
+        return bool((self.providers and self.countries) or self.anywhere)
+
+
 async def rank_titles_by_vector(
     db: AsyncSession,
     vector: np.ndarray,
     limit: int = 20,
     exclude_title_ids: set[uuid.UUID] | None = None,
     media_type: str | None = None,
-    on_services: tuple[list[int], list[str]] | None = None,
+    on_services: ServiceFilter | None = None,
 ) -> list[tuple[Title, float]]:
     settings = await client.require_ai(db)
     # How much of the HNSW graph to walk. The default of 40 gives poor
@@ -324,21 +346,28 @@ async def rank_titles_by_vector(
     )
     if media_type in ("movie", "tv"):
         query = query.where(Title.type == media_type)
-    if on_services:
+    if on_services is not None and on_services.matches_anything:
         # Kept in SQL rather than filtered afterwards. Done in Python it
         # would mean fetching a pool several times larger and throwing most
         # of it away, and the shelf would still run short for anyone whose
         # taste sits outside what their own services carry.
+        from sqlalchemy import or_
+
         from app.models import Availability
 
-        providers, countries = on_services
+        wanted: list[ColumnElement[bool]] = []
+        if on_services.providers and on_services.countries:
+            wanted.append(
+                (Availability.provider_id.in_(on_services.providers))
+                & (Availability.country.in_(on_services.countries))
+            )
+        if on_services.anywhere:
+            # No country condition, because there is no country data to
+            # condition on. See app.catalog.coverage.
+            wanted.append(Availability.provider_id.in_(on_services.anywhere))
         query = query.where(
             select(Availability.title_id)
-            .where(
-                Availability.title_id == Title.id,
-                Availability.provider_id.in_(providers),
-                Availability.country.in_(countries),
-            )
+            .where(Availability.title_id == Title.id, or_(*wanted))
             .exists()
         )
     query = query.order_by("dist").limit(limit + len(exclude_title_ids or ()))
@@ -424,7 +453,7 @@ async def score_pool(
     languages: list[str] | None = None,
     followed_people: set[int] | None = None,
     media_type: str | None = None,
-    on_services: tuple[list[int], list[str]] | None = None,
+    on_services: ServiceFilter | None = None,
 ) -> ScoredPool:
     """Score a pool of candidates, once.
 
@@ -528,7 +557,7 @@ async def diversified_ranking(
     discovery: str = "balanced",
     followed_people: set[int] | None = None,
     media_type: str | None = None,
-    on_services: tuple[list[int], list[str]] | None = None,
+    on_services: ServiceFilter | None = None,
 ) -> list[tuple[Title, float]]:
     """The anti-bubble ranking: score a pool, then arrange it."""
     pool = await score_pool(

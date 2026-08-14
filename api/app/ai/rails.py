@@ -28,6 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai import client as ai_client
 from app.ai import taste as taste_module
+from app.catalog import coverage
 from app.countries import for_user as countries_for
 from app.models import FollowedPerson, Interaction, Title, User, WatchEvent
 
@@ -706,7 +707,7 @@ async def _context(
             languages=prefs.get("languages") or None,
             followed_people=followed,
             media_type=media_type,
-            on_services=_service_filter(user),
+            on_services=await _service_filter(db, user),
         )
     except (ai_client.AIDisabled, ai_client.AIError):
         return None
@@ -715,7 +716,7 @@ async def _context(
     return Context(pool=pool, exclude=exclude, discovery=prefs.get("discovery") or "balanced")
 
 
-def _service_filter(user: User) -> tuple[list[int], list[str]] | None:
+async def _service_filter(db: AsyncSession, user: User) -> taste_module.ServiceFilter | None:
     """The services this person actually pays for.
 
     On by default, because a suggestion you cannot press play on is not a
@@ -727,7 +728,14 @@ def _service_filter(user: User) -> tuple[list[int], list[str]] | None:
     per country, so an empty service list or no country at all leaves it off
     rather than silently emptying every shelf. That is what makes the
     default safe: a new account is unfiltered until it has said what it
-    subscribes to."""
+    subscribes to.
+
+    Services the source does not list in this person's countries are carried
+    separately, and matched without the country condition. Otherwise the
+    filter reads a hole in the data as proof of absence: Disney Plus is not
+    modelled in Egypt at all, so every Marvel film was cut from the shelves
+    of somebody holding an Egyptian Disney Plus subscription.
+    """
     prefs = user.prefs or {}
     if not prefs.get("only_my_services", True):
         return None
@@ -735,7 +743,12 @@ def _service_filter(user: User) -> tuple[list[int], list[str]] | None:
     countries = countries_for(user)
     if not services or not countries:
         return None
-    return services, list(countries)
+    unlisted = await coverage.unlisted_services(db, list(countries), services)
+    return taste_module.ServiceFilter(
+        providers=[s for s in services if s not in unlisted],
+        countries=list(countries),
+        anywhere=sorted(unlisted),
+    )
 
 
 async def build_iter(

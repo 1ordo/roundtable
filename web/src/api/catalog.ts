@@ -30,6 +30,11 @@ export type ProviderEntry = {
   logo_path: string | null
   kind: 'stream' | 'rent' | 'buy' | 'ads' | 'free'
   url: string | null
+  /** A service you subscribe to that the catalogue does not track in your
+      country, carrying this somewhere else. Shown because a gap in the data
+      is not proof you cannot watch it, marked because it is not a local
+      listing either. */
+  unlisted_locally?: boolean
 }
 
 export type TitleDetail = {

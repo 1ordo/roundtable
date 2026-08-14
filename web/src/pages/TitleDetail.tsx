@@ -128,7 +128,11 @@ export function TitleDetail() {
             )}
 
             <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-muted">
-              <span className={title.type === 'movie' ? 'text-ember uppercase' : 'text-nitrate uppercase'}>
+              <span
+                className={
+                  title.type === 'movie' ? 'text-ember uppercase' : 'text-nitrate uppercase'
+                }
+              >
                 {title.type === 'movie' ? 'Film' : 'Series'}
               </span>
               {title.year && <span>{title.year}</span>}
@@ -248,7 +252,9 @@ export function TitleDetail() {
         </div>
 
         <section className="mt-10">
-          <h2 className="font-display text-2xl font-semibold uppercase tracking-[0.02em]">Where to watch</h2>
+          <h2 className="font-display text-2xl font-semibold uppercase tracking-[0.02em]">
+            Where to watch
+          </h2>
           {Object.keys(title.availability).length === 0 ? (
             <p className="mt-3 text-sm text-muted">
               Not on any tracked service in {title.countries.join(', ')} right now. It lands in your
@@ -279,8 +285,21 @@ export function TitleDetail() {
                             />
                           )}
                           <span className="text-sm">{entry.provider_name}</span>
-                          <span className="font-mono text-[10px] tracking-wider text-muted uppercase">
-                            {KIND_LABEL[entry.kind]}
+                          {/* Not a local listing, and it must not pretend to
+                              be one. The catalogue does not track this
+                              service in their country at all, so this says
+                              "you have this, and it carries the film" and
+                              stops short of claiming where. */}
+                          <span
+                            className={
+                              entry.unlisted_locally
+                                ? 'font-mono text-[10px] tracking-wider text-nitrate uppercase'
+                                : 'font-mono text-[10px] tracking-wider text-muted uppercase'
+                            }
+                          >
+                            {entry.unlisted_locally
+                              ? 'yours · unlisted here'
+                              : KIND_LABEL[entry.kind]}
                           </span>
                         </a>
                       ))}
@@ -293,7 +312,9 @@ export function TitleDetail() {
 
         {title.cast.length > 0 && (
           <section className="mt-10">
-            <h2 className="font-display text-2xl font-semibold uppercase tracking-[0.02em]">Cast</h2>
+            <h2 className="font-display text-2xl font-semibold uppercase tracking-[0.02em]">
+              Cast
+            </h2>
             <div className="wd-scroller mt-4 flex gap-4 pb-3">
               {title.cast.map((member) => {
                 const face = member.profile_path ? (

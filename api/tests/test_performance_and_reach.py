@@ -111,7 +111,9 @@ class TestEveryoneGetsAnAddress:
 
 
 class TestOnlyWhatYouSubscribeTo:
-    async def test_the_filter_is_on_by_default(self, client, fake_idp, db_session):
+    async def test_the_filter_is_on_by_default(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key
+    ):
         """Showing someone a Netflix title when they do not have Netflix is
         an advert for somebody else's product."""
         await do_login(client, fake_idp, {"sub": "s1", "preferred_username": "subscriber"})
@@ -122,9 +124,15 @@ class TestOnlyWhatYouSubscribeTo:
         user.country_code = "US"
         await db_session.commit()
 
-        assert rails._service_filter(user) == ([8], ["US"])
+        got = await rails._service_filter(db_session, user)
+        assert got is not None
+        assert got.providers == [8]
+        assert got.countries == ["US"]
+        assert got.anywhere == [], "Netflix is listed in the US, so it is a normal filter"
 
-    async def test_it_can_be_turned_off(self, client, fake_idp, db_session):
+    async def test_it_can_be_turned_off(
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key
+    ):
         await do_login(client, fake_idp, {"sub": "s2", "preferred_username": "everything"})
         user = (
             await db_session.execute(select(User).where(User.username == "everything"))
@@ -134,10 +142,10 @@ class TestOnlyWhatYouSubscribeTo:
         user.prefs = {"only_my_services": False}
         await db_session.commit()
 
-        assert rails._service_filter(user) is None
+        assert await rails._service_filter(db_session, user) is None
 
     async def test_an_account_that_has_picked_nothing_is_not_filtered_to_nothing(
-        self, client, fake_idp, db_session
+        self, client, fake_idp, db_session, fake_tmdb_http, tmdb_key
     ):
         """The default is only safe because of this: a new account has no
         services yet, and filtering on an empty set would empty every
@@ -145,8 +153,8 @@ class TestOnlyWhatYouSubscribeTo:
         await do_login(client, fake_idp, {"sub": "s3", "preferred_username": "fresh"})
         user = (await db_session.execute(select(User).where(User.username == "fresh"))).scalar_one()
         assert user.services == []
-        assert rails._service_filter(user) is None
+        assert await rails._service_filter(db_session, user) is None
 
         user.services = [8]
         await db_session.commit()
-        assert rails._service_filter(user) is None, "a country is needed too"
+        assert await rails._service_filter(db_session, user) is None, "a country is needed too"

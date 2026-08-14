@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
-from app.catalog import bootstrap, genre_map, ingest, local, omdb, omdb_source, tmdb
+from app.catalog import bootstrap, coverage, genre_map, ingest, local, omdb, omdb_source, tmdb
 from app.catalog.providers import click_out_url
 from app.config import get_settings
 from app.countries import for_user as countries_for
@@ -848,6 +848,12 @@ class ProviderEntry(BaseModel):
     logo_path: str | None
     kind: str
     url: str | None
+    # A service the viewer says they subscribe to, which the source does not
+    # list as operating in their country at all, carrying this title
+    # somewhere else. Shown, because a hole in the data is not a fact about
+    # what they can watch, and flagged, because it is not a local listing
+    # either. See app.catalog.coverage.
+    unlisted_locally: bool = False
 
 
 class TitleDetail(BaseModel):
@@ -968,6 +974,46 @@ async def title_detail(
                 url=click_out_url(entry.provider_name, title.name, entry.link),
             )
         )
+    # Services they pay for that the source does not model in their region.
+    # Disney Plus has two rows in Egypt across twenty-two thousand titles,
+    # not because Egypt cannot watch Disney Plus but because the upstream
+    # data has no concept of it there. Saying "not on any service you have"
+    # to somebody holding that subscription is the app overruling them with
+    # its own ignorance, so their own subscription wins and the entry says
+    # plainly that it is not a local listing.
+    mine = [int(s) for s in (user.services or [])]
+    unlisted = await coverage.unlisted_services(db, countries, mine)
+    if unlisted:
+        elsewhere = (
+            (
+                await db.execute(
+                    select(Availability).where(
+                        Availability.title_id == title.id,
+                        Availability.provider_id.in_(unlisted),
+                        Availability.kind == "stream",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        home = countries[0]
+        already = {(e.provider_name, e.kind) for group in availability.values() for e in group}
+        for entry in {row.provider_id: row for row in elsewhere}.values():
+            if (entry.provider_name, entry.kind) in already:
+                continue
+            availability.setdefault(home, []).append(
+                ProviderEntry(
+                    provider_name=entry.provider_name,
+                    logo_path=entry.logo_path,
+                    kind=entry.kind,
+                    # No local link exists, so send them to the service
+                    # rather than to a page written for another country.
+                    url=click_out_url(entry.provider_name, title.name, None),
+                    unlisted_locally=True,
+                )
+            )
+
     for country in availability:
         availability[country].sort(key=lambda e: (e.kind != "stream", e.provider_name))
 
