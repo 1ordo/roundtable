@@ -86,6 +86,9 @@ list_name is only for a set worth keeping (a franchise in order, a themed
 run), named as the person would name it, null when in doubt. But when the
 person explicitly asks for a list ("make me a list", "put them in a list",
 "save these"), that doubt is settled: always set list_name then.
+Format the reply in simple Markdown: short paragraphs, a numbered list
+for any watch order or ranked set, bold for film titles. No headings, no
+tables, no code blocks.
 Reply in the language the person wrote in. No emojis. No em dashes."""
 
 

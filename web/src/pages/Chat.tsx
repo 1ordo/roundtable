@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Markdown from 'react-markdown'
 import { motion } from 'motion/react'
 import clsx from 'clsx'
 import { currentCsrf } from '../api/client'
@@ -15,6 +16,48 @@ type Turn = {
   proposal?: Proposal | null
   steps?: Step[]
   considered?: Considered[]
+}
+
+/* The assistant writes Markdown: numbered watch orders, bold titles, short
+   paragraphs. Rendered with element overrides so it wears the app's type
+   rather than browser defaults. react-markdown never renders raw HTML, so
+   a reply that contains markup shows it as text instead of running it. */
+function Reply({ text }: { text: string }) {
+  return (
+    <div className="wd-plate max-w-xl px-4 py-3 leading-relaxed">
+      <Markdown
+        components={{
+          p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
+          ol: ({ children }) => (
+            <ol className="my-2 list-decimal space-y-1 pl-5 marker:text-muted">{children}</ol>
+          ),
+          ul: ({ children }) => (
+            <ul className="my-2 list-disc space-y-1 pl-5 marker:text-muted">{children}</ul>
+          ),
+          li: ({ children }) => <li className="pl-1">{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          a: ({ children, href }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              className="text-ember hover:underline"
+            >
+              {children}
+            </a>
+          ),
+          code: ({ children }) => (
+            <code className="rounded bg-panel-2 px-1 font-mono text-[0.85em]">{children}</code>
+          ),
+          h1: ({ children }) => <p className="my-2 font-semibold">{children}</p>,
+          h2: ({ children }) => <p className="my-2 font-semibold">{children}</p>,
+          h3: ({ children }) => <p className="my-2 font-semibold">{children}</p>,
+        }}
+      >
+        {text}
+      </Markdown>
+    </div>
+  )
 }
 
 const OPENERS = [
@@ -40,8 +83,25 @@ export function Chat() {
   // Read inside the stream loop, which closes over the first render's state.
   const stepsShownRef = useRef(0)
 
+  /* Follow the conversation only while the person is at the bottom of it.
+     Every tool call used to grow the trace and yank the view to the end,
+     so reading anything above during a long answer was impossible: the
+     page moved under you on each step. Scrolling up now disengages the
+     follow; returning to the bottom, or sending a message, re-engages it. */
+  const following = useRef(true)
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'end' })
+    const onScroll = () => {
+      const gap =
+        document.documentElement.scrollHeight - window.innerHeight - window.scrollY
+      following.current = gap < 160
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    if (following.current) endRef.current?.scrollIntoView({ block: 'end' })
   }, [turns.length, steps.length, running])
 
   /* Reveal one step at a time. The pace is deliberate rather than tied to
@@ -63,6 +123,9 @@ export function Chat() {
   async function send(message: string) {
     const text = message.trim()
     if (!text || running) return
+    // Sending is an act at the bottom of the conversation, wherever the
+    // scroll happened to be.
+    following.current = true
     const history = turns.map(({ role, content }) => ({ role, content }))
     setTurns((current) => [...current, { role: 'user', content: text }])
     setInput('')
@@ -199,9 +262,7 @@ export function Chat() {
                     />
                   </div>
                 )}
-                <p className="wd-plate max-w-xl px-4 py-3 leading-relaxed whitespace-pre-wrap">
-                  {turn.content}
-                </p>
+                <Reply text={turn.content} />
                 {turn.results && turn.results.length > 0 && (
                   <div className="wd-scroller mt-4 flex gap-4 pb-3">
                     {turn.results.map((title, i) => (
