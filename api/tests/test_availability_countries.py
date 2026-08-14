@@ -108,3 +108,51 @@ class TestTheCountriesAsked:
         assert "Disney Plus" in [p["provider_name"] for p in availability["GB"]]
         assert "Disney Plus" in [p["provider_name"] for p in availability["US"]]
         assert "MA" not in availability, "another account's country is not yours"
+
+
+class TestTheFallbackIsARealCountry:
+    """An environment variable set to nothing means unset, not "".
+
+    compose shipped RT_DEFAULT_COUNTRY: ${RT_DEFAULT_COUNTRY:-}, so every
+    instance whose operator had not chosen one ran with default_country
+    equal to the empty string. Anybody who had not set a country on their
+    profile was then looked up with `country IN ('')` and saw no
+    availability at all, anywhere, without anything saying so.
+    """
+
+    def test_a_blank_environment_value_does_not_become_a_country(self, monkeypatch):
+        from app.config import Settings
+
+        monkeypatch.setenv("RT_DEFAULT_COUNTRY", "")
+        assert Settings().default_country == "US"
+
+    def test_whitespace_is_not_a_country_either(self, monkeypatch):
+        from app.config import Settings
+
+        monkeypatch.setenv("RT_DEFAULT_COUNTRY", "   ")
+        assert Settings().default_country == "US"
+
+    def test_a_real_choice_is_kept_and_normalised(self, monkeypatch):
+        from app.config import Settings
+
+        monkeypatch.setenv("RT_DEFAULT_COUNTRY", "ma")
+        assert Settings().default_country == "MA"
+
+    def test_something_that_is_not_a_country_code_is_not_used(self, monkeypatch):
+        from app.config import Settings
+
+        monkeypatch.setenv("RT_DEFAULT_COUNTRY", "Egypt")
+        assert Settings().default_country == "US"
+
+    async def test_someone_with_no_country_still_gets_a_lookup(self, client, fake_idp, db_session):
+        """The end of the chain: the fallback has to be usable, or the fix
+        above only moves the silence one step along."""
+        await do_login(client, fake_idp, LORDO)
+        me = (await db_session.execute(select(User).where(User.username == "Lordo"))).scalar_one()
+        me.country_code = None
+        me.prefs = {}
+        await db_session.commit()
+
+        countries = _where_they_watch(me)
+        assert countries, "never an empty list"
+        assert all(len(c) == 2 for c in countries), countries

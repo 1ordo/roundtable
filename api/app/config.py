@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -50,6 +51,7 @@ class Settings(BaseSettings):
     # falls back to the generated estimate, which the response labels.
     imdb_guide_enabled: bool = False
     # Availability country used when a profile has no country set yet.
+    # Never blank: see the validator below.
     default_country: str = "US"
 
     # Uploads (avatars, import files). Overridden to the /data volume in
@@ -82,6 +84,21 @@ class Settings(BaseSettings):
     @property
     def tmdb_configured(self) -> bool:
         return bool(self.tmdb_api_key or self.tmdb_access_token)
+
+    @field_validator("default_country", mode="after")
+    @classmethod
+    def _country_is_never_blank(cls, value: str) -> str:
+        """An environment variable set to nothing means unset, not "".
+
+        compose passed RT_DEFAULT_COUNTRY: ${RT_DEFAULT_COUNTRY:-}, which
+        hands the container an empty string whenever the operator has not
+        chosen one. Pydantic took it as a real value and overrode the US
+        default with "", so anybody who had not set a country on their
+        profile was looked up with `country IN ('')` and saw no availability
+        anywhere, on every fresh instance, silently.
+        """
+        cleaned = (value or "").strip().upper()
+        return cleaned if len(cleaned) == 2 else "US"
 
     @property
     def dev_login_enabled(self) -> bool:
