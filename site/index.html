@@ -90,11 +90,21 @@
           </td>
         </tr>
         <tr>
+          <th>An assistant that researches</th>
+          <td>
+            Ask for everything related to a film and it searches the web,
+            reads what it finds, verifies every title against the database,
+            and answers with the watch order and one press to save it as a
+            list. The steps you see are the real tool calls. When it cannot
+            ground an answer, it says so.
+          </td>
+        </tr>
+        <tr>
           <th>No AI service required</th>
           <td>
             Recommendations run on embeddings generated locally. Point it at
-            an OpenAI-compatible endpoint if you want the assistant; it works
-            fully without one.
+            an OpenAI-compatible endpoint with a tool-calling model if you
+            want the assistant; everything else works fully without one.
           </td>
         </tr>
       </table>

@@ -428,17 +428,20 @@ export function Landing() {
           </div>
         </section>
 
-        <Prose kicker="Just ask" title="Something tense and smart, under two hours">
+        <Prose kicker="Just ask" title="An assistant that researches, not one that guesses">
           <p>
-            Ask in plain words and get picks drawn from your own history, your lists and the
-            whole catalog. It shows its working as it goes: how many titles it searched,
-            which ones it is considering, and how many of the names it came back with
-            actually exist in your catalog.
+            Ask for everything connected to The Nun and it resolves the franchise, searches
+            the web, reads what it finds, and checks every film it intends to name against
+            the database before it answers, in order, with one press to save the whole run
+            as a list. The trace above the answer is the real sequence of tool calls, shown
+            as they happen, and when it cannot ground an answer it says so rather than
+            dressing up a guess.
           </p>
           <p className="mt-4">
-            It also ships an MCP server, so your own AI assistant can use it. Ask Claude what
-            to watch tonight and the answer comes from your taste rather than from the
-            internet's.
+            It knows your history too, so the answer includes what you have already seen.
+            And it ships an MCP server, so your own AI assistant can use it: ask Claude
+            what to watch tonight and the answer comes from your taste rather than from
+            the internet's.
           </p>
         </Prose>
 

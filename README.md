@@ -56,9 +56,18 @@ profile.
 
 ![The parents guide](web/public/shots/guide.webp)
 
-**Just ask.** Plain words, answered from your own history and the whole
-catalog, showing its working as it goes. An MCP server ships with it, so
-your own AI assistant can use your watch history too.
+**An assistant that researches, not one that guesses.** Ask "everything
+related to The Nun so I know where to start" and it resolves the franchise,
+searches the web, reads what it finds, checks every title it intends to
+name against the film database, and only then answers, with the watch order
+and a one-press button to save it as a list. The trace above the answer is
+the real sequence of tool calls, shown as they run. When it cannot ground
+an answer it says so instead of dressing up a guess. Web content is treated
+as untrusted data, fetches are refused for anything that is not the public
+internet, and nothing writes without your press. Needs a chat model that
+can call tools; everything deterministic (franchise orders, plot search)
+works with no model at all. An MCP server ships too, so your own AI
+assistant can use your watch history.
 
 **A feed, and messages.** Post about what you watched, reply, share someone
 else's post with your own take, and write to friends directly. Every part of
@@ -173,7 +182,7 @@ Written down so nobody finds out the hard way. This is the state of the
 | Stats and year-in-review cards | Partial | Two of the four cards need at least three rated titles or three recognisable faces. |
 | Content advisories | Partial | From IMDb's parents guide via an unofficial endpoint that can break without warning. Falls back to an estimate. |
 | Imports | Partial | Netflix `ViewingActivity.csv` and `MyList.csv`. Unzip the GDPR archive yourself; uploading the zip is not supported. |
-| Assistant and natural-language search | Partial | Needs an OpenAI-compatible endpoint. Title cards are checked against the catalog; the prose around them is not. |
+| Assistant (agent with web access) | Works | Needs an OpenAI-compatible endpoint whose model supports tool calling. Searches the web and Reddit, verifies titles against TMDB, and the trace shows the real tool calls. Title cards are verified; the prose around them is not. |
 | Vibe tags | Not yet | Needs a real embedding endpoint. The bundled local encoder is lexical and cannot do zero-shot labels, so it skips rather than inventing them. |
 | MCP server | Works | Ten tools over a personal API token. No automated test coverage yet. |
 | Browser extension, watchlist import | Works | Netflix, Prime Video, OSN+. |
