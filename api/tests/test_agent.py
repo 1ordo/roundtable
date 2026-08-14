@@ -341,3 +341,41 @@ class TestAModelThatDies:
         events = [e async for e in agent.run(db_session, me, "anything")]
         assert events[-1]["reply"] == "Done with what I had."
         assert "none" in choices_seen, "tools were withdrawn once the budget was spent"
+
+
+class TestRepeatsAreFree:
+    async def test_the_same_call_twice_costs_one_budget_slot(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """Watched live: a follow-up run read the same page twice and
+        re-verified films it had confirmed a minute earlier, and those
+        repeats are what spent the budget. A repeat now answers from memory
+        and costs nothing."""
+        me = await _me(client, fake_idp, db_session)
+        executions = 0
+
+        async def counting_search(query):
+            nonlocal executions
+            executions += 1
+            return [{"title": "One result", "url": "https://example.com", "snippet": "x"}]
+
+        monkeypatch.setattr(webtools, "search_web", counting_search)
+
+        script = iter(
+            [
+                _tool_call("search_web", {"query": "same thing"}, "c1"),
+                _tool_call("search_web", {"query": "same thing"}, "c2"),
+                _final("Done.", []),
+            ]
+        )
+
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+            return next(script)
+
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+        events = [e async for e in agent.run(db_session, me, "anything")]
+
+        assert executions == 1, "the repeat was served from memory"
+        repeat = [e for e in events if "from earlier this answer" in e.get("detail", "")]
+        assert repeat, "the trace says the repeat cost nothing"
+        assert events[-1]["reply"] == "Done."
