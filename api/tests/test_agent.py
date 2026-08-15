@@ -486,3 +486,99 @@ class TestARoundRunsItsWebCallsTogether:
         events = [e async for e in agent.run(db_session, me, "anything")]
         assert events[-1]["reply"] == "Done."
         assert overlapped, "the two fetches ran at the same time"
+
+
+class TestAskingForAListIsTheDecision:
+    async def test_the_save_button_appears_even_when_the_model_forgets_to_name_it(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """ "Make me a list" got no Save button twice, because the model
+        returned list_name null both times despite being told. The server
+        now derives a name from the titles rather than depending on the
+        model's manners."""
+        me = await _me(client, fake_idp, db_session)
+        for n in range(3):
+            db_session.add(
+                Title(
+                    tmdb_id=980_000 + n,
+                    type="movie",
+                    name=f"Pokemon Film {n}",
+                    collection_name="Pokémon Collection",
+                )
+            )
+        await db_session.commit()
+
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+            return _final(
+                "Pokemon Film 0, 1 and 2.",
+                [
+                    {"name": f"Pokemon Film {n}", "tmdb_id": 980_000 + n, "type": "movie"}
+                    for n in range(3)
+                ],
+                list_name=None,
+            )
+
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+        events = [e async for e in agent.run(db_session, me, "make me a list of pokemon films")]
+        proposal = events[-1]["proposal"]
+        assert proposal is not None, "asking for a list settles it"
+        assert proposal["name"] == "Pokémon watch list"
+
+    async def test_no_list_was_asked_for_no_button_is_pushed(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """The backstop must not turn every three-title answer into an
+        offer, or the button becomes noise again."""
+        me = await _me(client, fake_idp, db_session)
+        for n in range(3):
+            db_session.add(Title(tmdb_id=981_000 + n, type="movie", name=f"Pick {n}"))
+        await db_session.commit()
+
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+            return _final(
+                "Pick 0, 1 and 2.",
+                [{"name": f"Pick {n}", "tmdb_id": 981_000 + n, "type": "movie"} for n in range(3)],
+                list_name=None,
+            )
+
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+        events = [e async for e in agent.run(db_session, me, "what should i watch tonight")]
+        assert events[-1]["proposal"] is None
+
+
+class TestTheContextStopsGrowing:
+    async def test_older_tool_results_are_trimmed_each_round(
+        self, client, fake_idp, db_session, ai_enabled, monkeypatch
+    ):
+        """Every round resends the whole conversation, so on a long answer
+        the resend is what the person waits on. Results already read keep
+        a reminder, not a transcript."""
+        me = await _me(client, fake_idp, db_session)
+        seen_lengths: list[int] = []
+
+        async def big_fetch(query):
+            return [{"title": "x" * 4000, "url": "https://example.com", "snippet": "y"}]
+
+        monkeypatch.setattr(webtools, "search_web", big_fetch)
+
+        script = iter(
+            [
+                _tool_call("search_web", {"query": "first"}, "c1"),
+                _tool_call("search_web", {"query": "second"}, "c2"),
+                _final("Done.", []),
+            ]
+        )
+
+        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+            for m in messages:
+                if m.get("role") == "tool":
+                    seen_lengths.append(len(m.get("content") or ""))
+            return next(script)
+
+        monkeypatch.setattr(agent.client, "chat_tools", scripted)
+        [e async for e in agent.run(db_session, me, "anything")]
+
+        # By the third model call, the first round's big result has been
+        # shrunk to a reminder.
+        assert seen_lengths, "tool results reached the model"
+        assert min(seen_lengths) <= 1500 + len(" ...[trimmed]")

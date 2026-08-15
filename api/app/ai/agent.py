@@ -23,6 +23,7 @@ the one write in the whole feature stays behind the person's Save button.
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -60,12 +61,13 @@ You have tools, and you are expected to actually use them:
   answers the question; the app will resolve what you name into real
   cards via search_tmdb, so prefer confirming names there before finishing.
 - Never invent a title, a year, or a streaming service.
-- Work efficiently: franchise_order resolves a whole series in one call,
-  and confirm_titles verifies a whole list of names in one call. Never
-  verify titles one by one with search_tmdb when you have more than two;
-  that is what confirm_titles is for. When you need several independent
-  lookups, issue them together in one turn rather than one per turn. Do
-  not re-verify what a tool already confirmed.
+- Work efficiently. Plan first, then gather: aim to finish in at most
+  five tool turns. franchise_order resolves a whole series in one call,
+  and confirm_titles verifies a whole list of names in one call; never
+  verify titles one by one with search_tmdb when you have more than two.
+  Issue independent lookups together in one turn, never one per turn. Do
+  not re-verify what a tool already confirmed, and never call a tool with
+  empty arguments.
 - Anything you already verified and named earlier in this conversation is
   still verified. A follow-up asking to change the list (include all of
   them, drop one, reorder) needs no tools at all: answer directly with the
@@ -288,7 +290,12 @@ async def _execute(db: AsyncSession, user: User, name: str, args: dict) -> tuple
                 )
             return _fence(hits), f"{args.get('query', '')!s} · {len(hits)} matches"
         if name == "confirm_titles":
-            names = [str(n) for n in (args.get("names") or [])][:40]
+            names = [str(n) for n in (args.get("names") or []) if str(n).strip()][:40]
+            if not names:
+                return (
+                    _fence({"error": "confirm_titles needs the list of names to confirm"}),
+                    "called with no names",
+                )
             confirmed: list[dict[str, Any]] = []
             for wanted in names:
                 match: dict[str, Any] | None = None
@@ -446,6 +453,37 @@ async def _resolve_titles(db: AsyncSession, named: list[dict]) -> tuple[list[Tit
     return resolved, dropped
 
 
+# The person saying "make me a list" is the decision, not a hint. The model
+# was told twice to set list_name in that case and skipped it twice, so the
+# server stops depending on its manners.
+_ASKED_FOR_A_LIST = re.compile(
+    r"\b(make|create|build|put|save|add)\b.{0,40}\blist\b|\blist\b.{0,20}\b(of|for|with)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _fallback_list_name(resolved: list[Title]) -> str:
+    """A name for the set nobody named.
+
+    The collection most of these belong to, when there is one, because that
+    is what a person would call it; otherwise the first title's franchise
+    root. Never a generic label: "Recommendations" tells you nothing when
+    you find it a month later."""
+    from collections import Counter
+
+    collections = Counter(
+        re.sub(r"\s*collection\s*$", "", t.collection_name, flags=re.I).strip()
+        for t in resolved
+        if t.collection_name
+    )
+    if collections:
+        best, count = collections.most_common(1)[0]
+        if count >= 2:
+            return f"{best} watch list"[:120]
+    root = re.split(r"[:\-]", resolved[0].name)[0].strip()
+    return f"{root} and related"[:120]
+
+
 async def run(
     db: AsyncSession, user: User, question: str, history: list[dict[str, str]] | None = None
 ) -> AsyncIterator[dict[str, Any]]:
@@ -507,6 +545,15 @@ async def run(
                 }
             )
             continue
+
+        # Results from earlier rounds have been read; what remains of their
+        # value is a reminder, not a transcript. Shrinking them bounds the
+        # context, which otherwise grows quadratically: every round resends
+        # everything, and on a forty-step answer the resend is what the
+        # person is waiting on.
+        for earlier in messages:
+            if earlier.get("role") == "tool" and len(earlier.get("content") or "") > 1500:
+                earlier["content"] = earlier["content"][:1500] + " ...[trimmed]"
 
         messages.append(
             {
@@ -621,6 +668,8 @@ async def run(
 
     list_name = final.get("list_name")
     list_name = " ".join(str(list_name).split())[:120] if list_name else None
+    if list_name is None and len(resolved) >= 3 and _ASKED_FOR_A_LIST.search(question):
+        list_name = _fallback_list_name(resolved)
     reply = chat_module._tidy(str(final.get("reply") or ""))
     if dropped and resolved:
         reply += f" ({dropped} of the titles it mentioned could not be verified and were left out.)"
