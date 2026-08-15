@@ -54,7 +54,9 @@ class TestTheLoop:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -92,7 +94,9 @@ class TestTheLoop:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             for message in messages:
                 if message.get("role") == "tool":
                     seen_by_model.append(message["content"])
@@ -117,7 +121,9 @@ class TestTheLoop:
         me = await _me(client, fake_idp, db_session)
         rounds = 0
 
-        async def always_hungry(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def always_hungry(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             nonlocal rounds
             rounds += 1
             return _tool_call("search_catalog", {"query": "more"}, call_id=f"c{rounds}")
@@ -141,7 +147,9 @@ class TestTheLoop:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -158,7 +166,9 @@ class TestTheAnswerIsGrounded:
         db_session.add(real)
         await db_session.commit()
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return _final(
                 "Watch Coco, and Definitely Not A Film.",
                 [
@@ -189,7 +199,9 @@ class TestTheAnswerIsGrounded:
             db_session.add(Title(tmdb_id=970_000 + n, type="movie", name=name, year=2000 + n))
         await db_session.commit()
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return _final(
                 "First One, Second One, then Third One.",
                 [
@@ -224,7 +236,9 @@ class TestTheWebCannotUseTheAgent:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             for message in messages:
                 if message.get("role") == "tool":
                     handed_over.append(message["content"])
@@ -294,7 +308,9 @@ class TestAModelThatDies:
         me = await _me(client, fake_idp, db_session)
         script = iter([_tool_call("search_catalog", {"query": "x"})])
 
-        async def dies_after_one(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def dies_after_one(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             try:
                 return next(script)
             except StopIteration:
@@ -316,7 +332,9 @@ class TestAModelThatDies:
         choices_seen: list[str | None] = []
         counter = 0
 
-        async def hungry_then_final(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def hungry_then_final(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             nonlocal counter
             choices_seen.append(tool_choice)
             if tool_choice == "none":
@@ -369,7 +387,9 @@ class TestRepeatsAreFree:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -401,7 +421,9 @@ class TestVerifyingALongList:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -479,7 +501,9 @@ class TestARoundRunsItsWebCallsTogether:
         }
         script = iter([both, _final("Done.", [])])
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return next(script)
 
         monkeypatch.setattr(agent.client, "chat_tools", scripted)
@@ -508,7 +532,9 @@ class TestAskingForAListIsTheDecision:
             )
         await db_session.commit()
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return _final(
                 "Pokemon Film 0, 1 and 2.",
                 [
@@ -534,7 +560,9 @@ class TestAskingForAListIsTheDecision:
             db_session.add(Title(tmdb_id=981_000 + n, type="movie", name=f"Pick {n}"))
         await db_session.commit()
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return _final(
                 "Pick 0, 1 and 2.",
                 [{"name": f"Pick {n}", "tmdb_id": 981_000 + n, "type": "movie"} for n in range(3)],
@@ -569,7 +597,9 @@ class TestTheContextStopsGrowing:
             ]
         )
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             for m in messages:
                 if m.get("role") == "tool":
                     seen_lengths.append(len(m.get("content") or ""))

@@ -156,7 +156,9 @@ class TestTheTraceDescribesWhatHappened:
         from app.ai import agent
         from app.ai import client as ai_client
 
-        async def scripted(db, messages, tools, max_tokens=1200, tool_choice=None):
+        async def scripted(
+            db, messages, tools, max_tokens=1200, tool_choice=None, allow_reasoning=False
+        ):
             return {
                 "content": json.dumps(
                     {"reply": "I could not resolve that set.", "titles": [], "list_name": None}

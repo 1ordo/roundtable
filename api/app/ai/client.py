@@ -320,6 +320,7 @@ async def chat_tools(
     tools: list[dict[str, Any]],
     max_tokens: int = 1200,
     tool_choice: str | None = None,
+    allow_reasoning: bool = False,
 ) -> dict[str, Any]:
     """One round of a tool-calling conversation.
 
@@ -343,10 +344,27 @@ async def chat_tools(
         "max_tokens": max_tokens,
         **_provider_extras(settings),
     }
+    if "openrouter" in (settings.base_url or "").lower():
+        # Reasoning is spent where it pays. A hybrid reasoning model burns
+        # tens of hidden seconds thinking about which tool to call next,
+        # and excluding the tokens hides that cost without removing it:
+        # measured live, tool rounds of ten to fifty seconds fell to two
+        # or three with reasoning off, making the same calls. But the
+        # finishing round is different: with reasoning off everywhere the
+        # model gathered for twenty-five rounds and never wrote an answer.
+        # So gathering rounds run without it and the synthesis round gets
+        # it back.
+        if allow_reasoning:
+            body["reasoning"] = {"exclude": True}
+        else:
+            body["reasoning"] = {"enabled": False, "exclude": True}
     if tool_choice is not None:
         # "none" forces a text answer: used when the tool budget is spent,
         # because a model that may still call tools will keep calling them.
         body["tool_choice"] = tool_choice
+        # Deliberately no response_format here: forcing json_object while
+        # tools are withdrawn sent the model into a loop of empty answers,
+        # measured live. The prose-then-reask path costs a round but ends.
     last: Exception | None = None
     for attempt in range(3):
         try:

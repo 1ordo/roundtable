@@ -44,6 +44,11 @@ logger = logging.getLogger("roundtable.agent")
 # ceiling this high is safe.
 MAX_ROUNDS = 25
 MAX_CALLS = 60
+# After this many gathering rounds the next call must be the answer. Not a
+# budget on work, a budget on indecision: rounds run without hidden
+# reasoning and are fast, but a model that is still gathering after eight
+# turns is circling, not closing in.
+FINISH_AFTER = 8
 # New titles ingested from one answer. A card needs a real row.
 MAX_INGEST = 30
 
@@ -54,6 +59,11 @@ You have tools, and you are expected to actually use them:
 - Verify before you present. If you are not sure of something, or a tool
   result looks odd or thin, do not present it. Search differently, try
   another tool, read a page. Only answer when you have grounds.
+- Match the size of the ask. Someone who says "everything", "all of them",
+  "complete" or "the whole world" wants the full set: resolve the
+  franchise, read a complete-list page, confirm the whole list with
+  confirm_titles, and include every confirmed title in your final answer.
+  A sample is a wrong answer to an "everything" question.
 - The catalog tools know this person; the web tools know the world. A
   question about orders, connections, "everything related to", or anything
   you are not certain of deserves a web or reddit search, not a guess.
@@ -247,6 +257,16 @@ async def _execute(db: AsyncSession, user: User, name: str, args: dict) -> tuple
     Tool failures are results, not exceptions: the agent seeing "the search
     returned nothing" and trying another way is the whole point.
     """
+    import time
+
+    started = time.monotonic()
+    try:
+        return await _execute_inner(db, user, name, args)
+    finally:
+        logger.info("tool %s took %.1fs", name, time.monotonic() - started)
+
+
+async def _execute_inner(db: AsyncSession, user: User, name: str, args: dict) -> tuple[str, str]:
     from app.catalog import local, plotsearch, tmdb, watch_order
 
     try:
@@ -512,15 +532,30 @@ async def run(
     # a minute earlier, and those repeats are what spent the budget.
     remembered: dict[str, tuple[str, str]] = {}
     final: dict[str, Any] | None = None
+    stalled = False
     for round_number in range(MAX_ROUNDS):
         # Once the budget is spent the model must answer in text; leaving
         # tools on its table means it keeps reaching for them, and a model
         # denied its tools round after round eventually answers with
         # nothing at all, which killed a real run.
         spent = calls >= MAX_CALLS
+        finishing = spent or round_number >= FINISH_AFTER or stalled
+        import time as _time
+
+        _round_started = _time.monotonic()
         try:
             message = await client.chat_tools(
-                db, messages, TOOLS, tool_choice="none" if spent else None
+                db,
+                messages,
+                TOOLS,
+                tool_choice="none" if finishing else None,
+                # The synthesis round gets the thinking back: writing
+                # the answer needs it, choosing the next tool does not.
+                # Tried on the first round too, to plan with; the model
+                # answers a planning round in prose instead of tool calls
+                # and the run collapses. Finish-only, measured live: same
+                # question 330s with thinking everywhere, 64s like this.
+                allow_reasoning=finishing,
             )
         except client.AIKeyUnreadable:
             raise
@@ -530,6 +565,9 @@ async def run(
             # trace; the reply says plainly that it could not finish.
             logger.info("model failed mid-loop: %s", exc)
             break
+        logger.info(
+            "model round %d took %.1fs", round_number + 1, _time.monotonic() - _round_started
+        )
         tool_calls = message.get("tool_calls") or []
         if not tool_calls:
             final = _parse_final(str(message.get("content") or ""))
@@ -589,6 +627,7 @@ async def run(
                     )
             parsed.append((call, name, args, memo_key, plan))
 
+        stalled = parsed != [] and all(plan is not None for *_rest, plan in parsed)
         concurrent = {"search_web", "search_reddit", "read_page"}
         fetches = {
             index: asyncio.ensure_future(_execute(db, user, name, args))
@@ -618,7 +657,7 @@ async def run(
                     "content": result[:8000],
                 }
             )
-        if round_number == MAX_ROUNDS - 2 or calls >= MAX_CALLS:
+        if round_number >= FINISH_AFTER - 2 or calls >= MAX_CALLS or stalled:
             messages.append(
                 {
                     "role": "user",
