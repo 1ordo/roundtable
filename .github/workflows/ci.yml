@@ -84,7 +84,7 @@ jobs:
           node-version: '22'
       - run: node --test
       - run: node build.js
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: extension
           path: extension/dist/*.zip
